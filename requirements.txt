@@ -1,0 +1,2 @@
+redis==3.4.1
+setuptools==41.2.0
