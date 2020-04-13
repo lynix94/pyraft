@@ -4,11 +4,11 @@ import setuptools
 from setuptools import setup
 from os import path
 
-__version__ = '0.1.3'
+__version__ = '0.1.4'
 
 requirements = [req.strip() for req in open('requirements.txt').readlines()]
 
-short_description ='python raft implementation with resp interface',
+short_description ='python raft implementation with resp interface'
 
 setup(
     name='pyraft',
@@ -24,11 +24,8 @@ setup(
     install_requires=requirements,
 	python_requires  = '>=3',
     classifiers = [
-        'Programming Language :: Python :: 3',
-        'Programming Language :: Python :: 3.2',
-        'Programming Language :: Python :: 3.3',
-        'Programming Language :: Python :: 3.4',
-        'Programming Language :: Python :: 3.5',
-        'Programming Language :: Python :: 3.6'
+        "Programming Language :: Python :: 3",
+        "License :: OSI Approved :: MIT License",
+        "Operating System :: OS Independent",
     ]
 )
