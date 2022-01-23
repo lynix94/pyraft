@@ -44,8 +44,10 @@ def intcast(src):
 
 	return int(src)
 
-error_cast = Exception('number format error')
-error_append_entry = Exception('append entry failed')
+ERROR_CAST = Exception('number format error')
+ERROR_APPEND_ENTRY = Exception('append entry failed')
+ERROR_TYPE = Exception('invalid data type')
+ERROR_NOT_EXISTS = Exception('not exists')
 
 
 class LogItem(object):
@@ -388,29 +390,37 @@ class BaseWorker(object):
 		if len(words) > 1:
 			start = intcast(words[1])
 			if start == None:
-				return error_cast
+				raise ERROR_CAST
 			
 		if len(words) > 2:
 			end = intcast(words[2])
 			if end == None:
-				return error_cast
+				raise ERROR_CAST
 
 		result = self.node.log.get_range(start, end)
 		return result.__repr__()
 
+	def propose(self, cmd):
+		handler = self.handler[cmd[0].lower()]
 
+		if 'e' in handler[1]:
+			if self.node.state == 'c':
+				self.node.log_warn('request while candidate')
+				raise Exception('temporary unavailable')
 
-	def invoke_append_entry(self, cmd):
-		if self.node.state == 'c':
-			self.node.log_warn('request while candidate')
-			return Exception('temporary unavailable')
+			if self.node.state != 'l':
+				raise Exception('recconect to leader')
 
-		if self.node.state != 'l':
-			return Exception('recconect to leader')
+			f = Future(cmd)
+			self.node.q_entry.put(f)
 
-		f = Future(cmd)
-		self.node.q_entry.put(f)
-		return f
+			ret = f.get(10)
+			if ret == ERROR_APPEND_ENTRY:
+				self.node.log_info('append_entry failed (%s)' % str(words))
+		else:
+			ret = handler[0](self.node, cmd)
+
+		return ret
 
 	def apply_loop(self):
 		i = 0
@@ -447,7 +457,11 @@ class BaseWorker(object):
 			handler = self.handler[cmd[0].lower()]
 
 			with self.node.data_lock:
-				ret = handler[0](self.node, cmd)
+				try:
+					ret = handler[0](self.node, cmd)
+				except Exception as e:
+					ret = e
+
 				self.node.index = item.index
 
 			if isinstance(item.cmd, Future):
@@ -487,13 +501,10 @@ class BaseWorker(object):
 					rio.write(Exception('too many param'))
 					continue
 
-				if 'e' in handler[1]:
-					ret = self.invoke_append_entry(words).get(10)
-					if ret == error_append_entry:
-						self.node.log_info('append_entry failed (%s)' % str(words))
-						rio.write(Exception('append entry failed'))
-				else:
-					ret = handler[0](self.node, words)
+				try:
+					ret = self.propose(words)
+				except Exception as e:
+					ret = e
 
 				if isinstance(ret, dict) and 'quit' in ret:
 					rio.close()
@@ -507,6 +518,7 @@ class RaftWorker(BaseWorker):
 	def init_handler(self):
 		super(RaftWorker, self).init_handler()
 
+		# String
 		self.handler['get'] = [self.do_get, 'r', 1, 1]
 		self.handler['del'] = [self.do_del, 'we', 1, 1]
 		self.handler['set'] = [self.do_set, 'we', 2, 2]
@@ -515,12 +527,102 @@ class RaftWorker(BaseWorker):
 		self.handler['pexpire'] = [self.do_pexpire, 'we', 2, 2]
 		self.handler['pexpireat'] = [self.do_pexpireat, 'we', 2, 2]
 
+		# Hash
+		self.handler['hgetall'] = [self.do_hgetall, 'r', 1, 1]
+		self.handler['hset'] = [self.do_hset, 'we', 3, -1]
+		self.handler['hget'] = [self.do_hget, 'r', 2, 2]
+		self.handler['hdel'] = [self.do_hdel, 'we', 2, -1]
+		self.handler['hlen'] = [self.do_hlen, 'r', 1, 1]
+
+	def do_hgetall(self, node, words):
+		key = words[1].strip()
+		self.node.check_ttl(key)
+
+		result = []
+		if key in self.node.data:
+			hobj = self.node.data[key]
+
+			if not isinstance(hobj, dict):
+				raise ERROR_TYPE
+
+			for k, v in hobj.items():
+				result.append(k)
+				result.append(v)
+
+		return result
+
+	def do_hdel(self, node, words):
+		key = words[1].strip()
+		self.node.check_ttl(key)
+
+		count = 0
+		if key in self.node.data:
+			hobj = self.node.data[key]
+
+			if not isinstance(hobj, dict):
+				raise ERROR_TYPE
+
+			if words[2] in hobj:
+				del(hobj[words[2]])
+				count += 1
+
+		return count
+
+	def do_hset(self, node, words):
+		key = words[1].strip()
+		self.node.check_ttl(key)
+
+		if key not in self.node.data:
+			self.node.data[key] = {}
+
+		hobj = self.node.data[key]
+		if not isinstance(hobj, dict):
+			raise ERROR_TYPE
+
+		hobj[words[2]] = words[3]
+
+		return True
+
+	def do_hlen(self, node, words):
+		key = words[1].strip()
+		self.node.check_ttl(key)
+
+		if key in self.node.data:
+			hobj = self.node.data[key]
+			if not isinstance(hobj, dict):
+				raise ERROR_TYPE
+
+			return len(hobj)
+
+		return 0
+
+	def do_hget(self, node, words):
+		key = words[1].strip()
+		self.node.check_ttl(key)
+
+		if key in self.node.data:
+			hobj = self.node.data[key]
+
+			if not isinstance(hobj, dict):
+				raise ERROR_TYPE
+
+			if words[2] not in hobj:
+				raise ERROR_NOT_EXISTS
+
+			return hobj[words[2]]
+
+		return None
+
 	def do_get(self, node, words):
 		key = words[1].strip()
 		self.node.check_ttl(key)
 
 		if key in self.node.data:
-			return self.node.data[key]
+			value = self.node.data[key]
+			if not isinstance(value, str):
+				raise ERROR_TYPE
+
+			return value
 
 		return None
 
@@ -546,28 +648,28 @@ class RaftWorker(BaseWorker):
 	def do_pexpireat(self, node, words):
 		ts = intcast(words[2])
 		if ts == None:
-			return error_cast
+			raise ERROR_CAST
 
 		return self.pexpreat(words[1], ts)
 
 	def do_pexpire(self, node, words):
 		msec = intcast(words[2])
 		if msec == None:
-			return error_cast
+			raise ERROR_CAST
 
 		return self.pexpireat(words[1], int(time.time()*1000) + msec)
 
 	def do_expireat(self, node, words):
 		ts = intcast(words[2])
 		if ts == None:
-			return error_cast
+			raise ERROR_CAST
 
 		return self.pexpreat(words[1], ts * 1000)
 
 	def do_expire(self, node, words):
 		sec = intcast(words[2])
 		if sec == None:
-			return error_cast
+			raise ERROR_CAST
 
 		return self.pexpireat(words[1], int(time.time()*1000) + (sec * 1000))
 
@@ -657,7 +759,11 @@ class RaftNode(object):
 				cmd = l[3]
 
 				handler = self.worker.handler[cmd[0].lower()]
-				handler[0](self, cmd)
+				try:
+					handler[0](self, cmd)
+				except Exception:
+					pass
+
 				self.index = index
 				self.log.index = self.index
 
@@ -788,7 +894,6 @@ class RaftNode(object):
 					rio.close()
 					return
 					
-
 			peer = self.peers[nid]
 			if peer.addr != addr:
 				rio.write(Exception('nid already in ensemble'))
@@ -1111,7 +1216,7 @@ class RaftNode(object):
 				self.log.push(item, self.commit_index)
 				# send dummy append below to noti commit
 			else:
-				future.set(error_append_entry)
+				future.set(ERROR_APPEND_ENTRY)
 				return
 
 		append_cmd = ['append_entry', self.term, prev_term, prev_index, self.commit_index, ts]
@@ -1288,7 +1393,13 @@ class RaftNode(object):
 		else:
 			return False
 
+	def request(self, *cmd):
+		try:
+			ret = self.worker.propose(cmd)
+		except Exception as e:
+			ret = e
 
+		return ret
 
 
 from optparse import OptionParser
