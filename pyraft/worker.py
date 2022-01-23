@@ -115,7 +115,21 @@ class BaseWorker(object):
                 raise Exception('temporary unavailable')
 
             if self.node.state != 'l':
-                raise Exception('recconect to leader')
+                for nid, p in self.node.get_peers().items():
+                    if p.state == 'l':
+                        try:
+                            if not hasattr(p, 'req_io'):
+                                ip, port = p.addr.split(':')
+                                sock = socket.socket()
+                                sock.connect((ip, int(port)))
+                                p.req_io = resp.resp_io(sock)
+
+                            p.req_io.write(cmd)
+                            return p.req_io.read()
+                        except Exception as e:
+                            p.req_io.close()
+                            delattr(p, req_io)
+                            raise Exception('relay to leader has exception: %s', str(e))
 
             f = Future(cmd)
             self.node.q_entry.put(f)
