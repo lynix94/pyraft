@@ -38,6 +38,7 @@ ERROR_CAST = Exception('number format error')
 ERROR_APPEND_ENTRY = Exception('append entry failed')
 ERROR_TYPE = Exception('invalid data type')
 ERROR_NOT_EXISTS = Exception('not exists')
+ERROR_INVALID_PARAM = Exception('invalid parameter')
 
 
 class Future(object):

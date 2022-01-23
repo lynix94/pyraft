@@ -239,22 +239,199 @@ class RaftWorker(BaseWorker):
         self.handler['hlen'] = [self.do_hlen, 'r', 1, 1]
 
         # List
-        '''
-        self.handler['lpush'] = [self.do_lpush, 'we', 1, 1]
+        self.handler['lpush'] = [self.do_lpush, 'we', 2, -1]
+        self.handler['rpush'] = [self.do_rpush, 'we', 2, -1]
         self.handler['rpop'] = [self.do_rpop, 'we', 1, 1]
-        self.handler['rpush'] = [self.do_rpush, 'we', 1, 1]
         self.handler['lpop'] = [self.do_lpop, 'we', 1, 1]
-        self.handler['lrange'] = [self.do_lrange, 'r', 1, 1]
-        self.handler['lindex'] = [self.do_lindex, 'r', 1, 1]
+        self.handler['lrange'] = [self.do_lrange, 'r', 3, 3]
+        self.handler['lindex'] = [self.do_lindex, 'r', 2, 2]
         self.handler['llen'] = [self.do_llen, 'r', 1, 1]
-        self.handler['lset'] = [self.do_lset, 'we', 1, 1]
-        self.handler['linsert'] = [self.do_linsert, 'we', 1, 1]
-        self.handler['lrem'] = [self.do_lrem, 'we', 1, 1]
-        self.handler['ltrim'] = [self.do_ltrim, 'we', 1, 1]
-        '''
+        self.handler['lset'] = [self.do_lset, 'we', 3, 3]
+        self.handler['lrem'] = [self.do_lrem, 'we', 3, 3]
+        self.handler['ltrim'] = [self.do_ltrim, 'we', 3, 3]
 
-    # Set
-    # TODO
+    def do_lpush(self, node, words):
+        key = words[1].strip()
+        self.node.check_ttl(key)
+
+        values = words[2:]
+
+        if key not in self.node.data:
+            self.node.data[key] = []
+
+        lobj = self.node.data[key]
+        if not isinstance(lobj, list):
+            raise ERROR_TYPE
+
+        for v in values:
+            lobj.insert(0, v)
+
+        return len(lobj)
+
+
+    def do_rpush(self, node, words):
+        key = words[1].strip()
+        self.node.check_ttl(key)
+
+        values = words[2:]
+
+        if key not in self.node.data:
+            self.node.data[key] = []
+
+        lobj = self.node.data[key]
+
+        if not isinstance(lobj, list):
+            raise ERROR_TYPE
+
+        for v in values:
+            lobj.append(v)
+
+        return len(lobj)
+
+    def do_rpop(self, node, words):
+        key = words[1].strip()
+        self.node.check_ttl(key)
+
+        if key in self.node.data:
+            lobj = self.node.data[key]
+
+            if not isinstance(lobj, list):
+                raise ERROR_TYPE
+
+            return lobj.pop()
+
+        return None
+
+    def do_lpop(self, node, words):
+        key = words[1].strip()
+        self.node.check_ttl(key)
+
+        if key in self.node.data:
+            lobj = self.node.data[key]
+
+            if not isinstance(lobj, list):
+                raise ERROR_TYPE
+
+            return lobj.pop(0)
+
+        return None
+
+    def do_lrange(self, node, words):
+        key = words[1].strip()
+        self.node.check_ttl(key)
+
+        start = int(words[2])
+        end = int(words[3]) + 1
+
+        if key in self.node.data:
+            lobj = self.node.data[key]
+
+            if not isinstance(lobj, list):
+                raise ERROR_TYPE
+
+            if end == 0:
+                end = len(lobj)
+
+            return lobj[start:end]
+
+        return None
+
+    def do_lindex(self, node, words):
+        key = words[1].strip()
+        self.node.check_ttl(key)
+
+        index = int(words[2])
+
+        if key in self.node.data:
+            lobj = self.node.data[key]
+            if not isinstance(lobj, list):
+                raise ERROR_TYPE
+
+            return lobj[index]
+
+        return None
+
+    def do_llen(self, node, words):
+        key = words[1].strip()
+        self.node.check_ttl(key)
+
+        if key in self.node.data:
+            lobj = self.node.data[key]
+            if not isinstance(lobj, list):
+                raise ERROR_TYPE
+
+            return len(lobj)
+
+        return 0
+
+    def do_lset(self, node, words):
+        key = words[1].strip()
+        self.node.check_ttl(key)
+
+        index = int(words[2])
+        value = words[3]
+
+        if key in self.node.data:
+            lobj = self.node.data[key]
+
+            if not isinstance(lobj, list):
+                raise ERROR_TYPE
+
+            lobj[index] = value
+
+        return True
+
+    def do_lrem(self, node, words):
+        key = words[1].strip()
+        self.node.check_ttl(key)
+
+        count = int(words[2])
+        value = words[3]
+
+        if key in self.node.data:
+            lobj = self.node.data[key]
+
+            if not isinstance(lobj, list):
+                raise ERROR_TYPE
+
+            org_len = len(lobj)
+
+            if count > 0:
+                for i in range(count):
+                    try:
+                        lobj.remove(value)
+                    except ValueError:
+                        break
+
+                return org_len - len(lobj)
+            elif count == 0:
+                l = [x for x in lobj if x != value]
+                self.node.data[key] = l
+                return org_len - len(l)
+            else:
+                raise ERROR_INVALID_PARAM
+
+        return 0
+
+    def do_ltrim(self, node, words):
+        key = words[1].strip()
+        self.node.check_ttl(key)
+
+        start = int(words[2])
+        end = int(words[3]) + 1
+
+        if key in self.node.data:
+            lobj = self.node.data[key]
+
+            if not isinstance(lobj, list):
+                raise ERROR_TYPE
+
+            if end == 0:
+                end = len(lobj)
+            ret = lobj[start:end]
+            self.node.data[key] = lobj
+
+        return True
 
     def do_hgetall(self, node, words):
         key = words[1].strip()
