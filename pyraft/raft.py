@@ -181,6 +181,7 @@ class RaftNode(object):
 				sock = socket.socket()
 				sock.connect((peer.ip, peer.port+1))
 			except socket.error:
+				sock.close()
 				continue
 
 			peer.raft_req = resp.resp_io(sock)
@@ -281,6 +282,8 @@ class RaftNode(object):
 				self.log_error('unknown state: %s' % self.state)
 
 			if self.shutdown_flag:
+				for nid, peer in self.get_peers().items():
+					peer.raft_req.close()
 				break
 
 	def set_leader(self, node):

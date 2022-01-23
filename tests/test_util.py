@@ -16,15 +16,16 @@ def connect_leader(nodes):
 		s.send(b'info\r\n')
 		data = s.recv(4096).decode('utf-8')
 		lines = data.split('\r\n')
-		#print lines
+		#print(lines)
 
 		info = json.loads(lines[1])
-		#print info
+		#print(info)
+		s.close()
 
 		if info['state'] == 'l':
 			r = redis.StrictRedis(host=n.ip, port=n.port)
 			return r
-		
+
 	return None
 
 

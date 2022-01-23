@@ -116,11 +116,11 @@ class resp_io:
 			try:
 				ret = self.sock.send(msg.encode())
 			except socket.error:
-				self.sock = None
+				self.close()
 				return None
 
 			if ret == 0:
-				self.sock = None
+				self.close()
 				return None
 
 			return ret
@@ -128,12 +128,12 @@ class resp_io:
 		try:
 			ret =  self.sock.send(encoding(msg).encode())
 			if ret == 0:
-				self.sock = None
+				self.close()
 				return None
 			return ret
 				
 		except socket.error:
-			self.sock = None
+			self.close()
 			return None
 
 
@@ -151,11 +151,11 @@ class resp_io:
 				try:
 					tmp = self.sock.recv(4096).decode('utf-8')
 				except socket.error:
-					self.sock = None
+					self.close()
 					return None
 
 				if tmp == '':
-					self.sock = None
+					self.close()
 					return None
 				
 				self.buff += tmp
@@ -170,11 +170,11 @@ class resp_io:
 				try:
 					tmp = self.sock.recv(4096).decode('utf-8')
 				except socket.error:
-					self.sock = None
+					self.close()
 					return None
 
 				if tmp == '':
-					self.sock = None
+					self.close()
 					return None
 				
 				self.buff += tmp
