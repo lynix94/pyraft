@@ -719,24 +719,24 @@ class RaftNode(object):
 	# log, etc
 	#
 	def log_debug(self, msg):
-		if g_log_level <= 0:
+		if get_log_level() <= 0:
 			log = '[DEBUG][%s-%d(%s):%s] %s\n' % (self.nid, self.term, self.state, datetime.now(), msg)
-			g_log_handle.write(log)
+			log_write(log)
 
 	def log_info(self, msg):
-		if g_log_level <= 1:
+		if get_log_level() <= 1:
 			log = '[INFO][%s-%d(%s):%s] %s\n' % (self.nid, self.term, self.state, datetime.now(), msg)
-			g_log_handle.write(log)
+			log_write(log)
 
 	def log_warn(self, msg):
-		if g_log_level <= 2:
+		if get_log_level() <= 2:
 			log = '[WARN][%s-%d(%s):%s] %s\n' % (self.nid, self.term, self.state, datetime.now(), msg)
-			g_log_handle.write(log)
+			log_write(log)
 
 	def log_error(self, msg):
-		if g_log_level <= 3:
+		if get_log_level() <= 3:
 			log = '[ERROR][%s-%d(%s):%s] %s\n' % (self.nid, self.term, self.state, datetime.now(), msg)
-			g_log_handle.write(log)
+			log_write(log)
 
 
 	def check_ttl(self, key):
