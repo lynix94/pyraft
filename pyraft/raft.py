@@ -117,10 +117,11 @@ class RaftNode(object):
 		self.th_le.start()
 
 		self.worker.start()
+		self.on_start()
 
 	def shutdown(self):
 		self.shutdown_flag = True
-		
+		self.on_shutdown()
 
 	def join(self):
 		self.th_raft.join()
@@ -132,7 +133,6 @@ class RaftNode(object):
 		for nid, peer in self.get_peers().items():
 			peer.raft_req.close()
 			peer.raft_wait.close()
-
 
 	def add_node(self, nid, addr):
 		with self.peer_lock:
@@ -555,6 +555,19 @@ class RaftNode(object):
 		for nid, p in self.get_peers().items():
 			p.raft_req.write(append_cmd)
 
+	def get_pending_time(self): # get max diff ack time
+		if self.state != 'l':
+			return None # cannot determine
+
+		now = time.time()
+		max_diff = 0
+		for nid, p in self.get_peers().items():
+			if p.state == 'f':
+				diff = now - p.last_append_entry_ts
+				if diff > max_diff:
+					max_diff = diff
+
+		return max_diff
 
 	def do_leader(self):
 		#self.log_info('do_leader')
@@ -654,6 +667,24 @@ class RaftNode(object):
 	#
 	# changed plugin. inherit or modify this
 	#
+	def on_start(self):
+		self.log_info('on_start called')
+		if 'on_start' in self.worker.handler:
+			handler = self.worker.handler['on_start']
+			if isinstance(handler, list):
+				handler[0](self)
+			else:
+				handler(self)
+
+	def on_shutdown(self):
+		self.log_info('on_shutdown called')
+		if 'on_start' in self.worker.handler:
+			handler = self.worker.handler['on_shutdown']
+			if isinstance(handler, list):
+				handler[0](self)
+			else:
+				handler(self)
+
 	def on_leader(self):
 		self.log_info('on_leader called')
 		if 'on_leader' in self.worker.handler:
