@@ -14,6 +14,9 @@ class BaseWorker(object):
         self.th_worker = threading.Thread(target=self.worker_listen, args=(node,))
         self.th_worker.start()
 
+    def shutdown(self):
+        self.shutdown_flag = True
+
     def join(self):
         self.th_worker.join()
 
@@ -143,7 +146,6 @@ class BaseWorker(object):
                     return
 
                 rio.write(ret)
-
 
     def relay_cmd(self, leader, cmd):
         p = leader

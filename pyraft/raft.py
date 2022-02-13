@@ -51,8 +51,23 @@ class RaftNode(object):
 
 			self.add_node(pid, paddr)
 
+	def get_handler(self, name):
+		if name not in self.worker.handler:
+			return None
+
+		return self.worker.handler[name]
+
+	def get_handler_func(self, name): # return function only
+		handler = self.get_handler(name)
+		if isinstance(handler, list):
+			return handler[0]
+
+		return handler
+
 	def propose(self, cmd):
-		handler = self.worker.handler[cmd[0].lower()]
+		handler = self.get_handler(cmd[0].lower())
+		if handler is None:
+			raise Exception('unknown commands: %s' % cmd)
 
 		if 'e' in handler[1]:
 			if self.state == 'c':
@@ -105,11 +120,10 @@ class RaftNode(object):
 
 			self.log_debug('apply command [%d]: "%s"' % (item.index, str(cmd)))
 
-			if cmd[0].lower() not in self.worker.handler:
-				self.log_error('unknown command: "%s"' % str(cmd))
-				sys.exit(0)
-
-			handler = self.worker.handler[cmd[0].lower()]
+			handler = self.get_handler(cmd[0].lower())
+			if handler is None:
+				self.log_error('unknown command: %s' % cmd)
+				sys.exit(-1)
 
 			with self.data_lock:
 				try:
@@ -158,7 +172,11 @@ class RaftNode(object):
 				index = l[1]
 				cmd = l[3]
 
-				handler = self.worker.handler[cmd[0].lower()]
+				handler = self.get_handler(cmd[0].lower())
+				if handler is None:
+					self.log_error('unknown command: %s' % cmd)
+					sys.exit(-1)
+
 				try:
 					handler[0](self, cmd)
 				except Exception:
@@ -190,7 +208,7 @@ class RaftNode(object):
 		self.on_start()
 
 	def shutdown(self):
-		self.worker.shutdown_flag = True
+		self.worker.shutdown()
 		self.shutdown_flag = True
 		self.on_shutdown()
 
@@ -741,52 +759,37 @@ class RaftNode(object):
 				p.raft_req.write(['append_entry', self.term, l.term, l.index-1, self.commit_index, l.ts] + l.cmd)
 
 	#
-	# changed plugin. inherit or modify this
+	# changed plugin. inherit or modify this (or add handler)
 	#
 	def on_start(self):
 		self.log_info('on_start called')
-		if 'on_start' in self.worker.handler:
-			handler = self.worker.handler['on_start']
-			if isinstance(handler, list):
-				handler[0](self)
-			else:
-				handler(self)
+		handler = self.get_handler_func('on_start')
+		if handler is not None:
+			handler(self)
 
 	def on_shutdown(self):
 		self.log_info('on_shutdown called')
-		if 'on_shutdown' in self.worker.handler:
-			handler = self.worker.handler['on_shutdown']
-			if isinstance(handler, list):
-				handler[0](self)
-			else:
-				handler(self)
+		handler = self.get_handler_func('on_shutdown')
+		if handler is not None:
+			handler(self)
 
 	def on_leader(self):
 		self.log_info('on_leader called')
-		if 'on_leader' in self.worker.handler:
-			handler = self.worker.handler['on_leader']
-			if isinstance(handler, list):
-				handler[0](self)
-			else:
-				handler(self)
+		handler = self.get_handler_func('on_leader')
+		if handler is not None:
+			handler(self)
 
 	def on_follower(self):
 		self.log_info('on_follower called')
-		if 'on_follower' in self.worker.handler:
-			handler = self.worker.handler['on_follower']
-			if isinstance(handler, list):
-				handler[0](self)
-			else:
-				handler(self)
+		handler = self.get_handler_func('on_follower')
+		if handler is not None:
+			handler(self)
 
 	def on_candidate(self):
 		self.log_info('on_candidate called')
-		if 'on_candidate' in self.worker.handler:
-			handler = self.worker.handler['on_candidate']
-			if isinstance(handler, list):
-				handler[0](self)
-			else:
-				handler(self)
+		handler = self.get_handler_func('on_candidate')
+		if handler is not None:
+			handler(self)
 		
 	#
 	# log, etc
