@@ -72,14 +72,12 @@ class TestOPS(unittest.TestCase):
 		end = time.time()
 		print('ops: %d' % (count / (end-start)))
 
-
 		n1.shutdown()
 		n1.join()
 		n2.shutdown()
 		n2.join()
 		n3.shutdown()
 		n3.join()
-
 
 if __name__ == '__main__':
     unittest.main()

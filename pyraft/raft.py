@@ -15,8 +15,8 @@ class RaftNode(object):
 		self.term = 0
 		self.index = 0
 		self.state = 'c'
-		self.last_append_entry_ts = 0
-		self.last_delayed_ts = 0
+		self.last_append_entry_ts = 1
+		self.last_delayed_ts = 1
 		self.last_checkpoint = 0
 		self.first_append_entry = False
 		self.last_applied = 0
@@ -40,8 +40,6 @@ class RaftNode(object):
 
 		self.log = RaftLog(nid)
 		self.worker = RaftWorker()
-		if self.worker != None:
-			self.worker.set_node(self)
 		self.data = {}
 		self.data_lock = threading.Lock()
 		self.data['ttl'] = {}
@@ -53,6 +51,76 @@ class RaftNode(object):
 
 			self.add_node(pid, paddr)
 
+	def propose(self, cmd):
+		handler = self.worker.handler[cmd[0].lower()]
+
+		if 'e' in handler[1]:
+			if self.state == 'c':
+				self.log_warn('request while candidate')
+				raise Exception('temporary unavailable')
+
+			if self.state != 'l':
+				for nid, p in self.get_peers().items():
+					if p.state == 'l':
+						return self.worker.relay_cmd(p, cmd)
+
+				raise Exception('cannot relay to leader')
+
+			f = Future(cmd)
+			self.q_entry.put(f)
+
+			ret = f.get(10)
+			if ret == ERROR_APPEND_ENTRY:
+				self.log_info('append_entry failed (%s)' % str(words))
+		else:
+			ret = handler[0](self, cmd)
+
+		return ret
+
+	def apply_loop(self):
+		i = 0
+		while True:
+			if self.shutdown_flag:
+				break
+
+			if i % 10 == 0:
+				# print self.get_snapshot()
+				pass
+			i += 1
+
+			if self.log.size() > CONF_LOG_MAX:
+				self.checkpoint()
+
+			item = self.log.pop(1)
+			if item == None:
+				continue
+
+			cmd = item.cmd
+			if isinstance(cmd, Future):
+				cmd = cmd.cmd
+
+			if self.index >= item.index:
+				self.log_info('skip log [%d:%d]: "%s"' % (self.index, item.index, str(cmd)))
+				continue
+
+			self.log_debug('apply command [%d]: "%s"' % (item.index, str(cmd)))
+
+			if cmd[0].lower() not in self.worker.handler:
+				self.log_error('unknown command: "%s"' % str(cmd))
+				sys.exit(0)
+
+			handler = self.worker.handler[cmd[0].lower()]
+
+			with self.data_lock:
+				try:
+					ret = handler[0](self, cmd)
+				except Exception as e:
+					ret = e
+
+				self.index = item.index
+
+			if isinstance(item.cmd, Future):
+				item.cmd.set(ret)
 
 	def load(self, filename):
 		self.log_info('nid %s load %s' % (self.nid, filename))
@@ -109,30 +177,35 @@ class RaftNode(object):
 
 		self.q_entry = queue.Queue(4096)
 
-		self.raft_listen_sock = socket.socket()
 		self.th_raft = threading.Thread(target = self.raft_listen)
 		self.th_raft.start()
 
 		self.th_le = threading.Thread(target = self.leader_election)
 		self.th_le.start()
 
-		self.worker.start()
+		self.th_apply = threading.Thread(target=self.apply_loop)
+		self.th_apply.start()
+
+		self.worker.start(self)
 		self.on_start()
 
 	def shutdown(self):
+		self.worker.shutdown_flag = True
 		self.shutdown_flag = True
 		self.on_shutdown()
 
 	def join(self):
 		self.th_raft.join()
 		self.th_le.join()
+		self.th_apply.join()
 
 		self.worker.join()
 
-		self.raft_listen_sock.close()
 		for nid, peer in self.get_peers().items():
 			peer.raft_req.close()
 			peer.raft_wait.close()
+
+		self.log.close()
 
 	def add_node(self, nid, addr):
 		with self.peer_lock:
@@ -250,20 +323,20 @@ class RaftNode(object):
 			rio.close()
 			
 	def raft_listen(self):
+		self.raft_listen_sock = socket.socket()
 		self.raft_listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 		self.raft_listen_sock.bind((self.ip, self.port+1))
 		self.raft_listen_sock.listen(1)
-
 		self.raft_listen_sock.settimeout(1)
+
 		while True:
 			try:
 				sock, addr = self.raft_listen_sock.accept()
 				self.process_raft_accept(sock)
 			except socket.timeout:
 				if self.shutdown_flag:
+					self.raft_listen_sock.close()
 					break
-				continue
-
 
 	#
 	# leader election
@@ -681,7 +754,7 @@ class RaftNode(object):
 
 	def on_shutdown(self):
 		self.log_info('on_shutdown called')
-		if 'on_start' in self.worker.handler:
+		if 'on_shutdown' in self.worker.handler:
 			handler = self.worker.handler['on_shutdown']
 			if isinstance(handler, list):
 				handler[0](self)
@@ -761,7 +834,7 @@ class RaftNode(object):
 
 	def request(self, *cmd):
 		try:
-			ret = self.worker.propose(cmd)
+			ret = self.propose(cmd)
 		except Exception as e:
 			ret = e
 

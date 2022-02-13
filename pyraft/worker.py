@@ -1,4 +1,4 @@
-import threading, socket
+import time, socket
 
 from pyraft.common import *
 from pyraft import resp
@@ -8,39 +8,31 @@ class BaseWorker(object):
     def __init__(self):
         self.handler = {}
         self.init_handler()
-        self.node = None
+        self.shutdown_flag = False
 
-    def set_node(self, node):
-        self.node = node
-
-    def start(self):
-        self.worker_listen_sock = socket.socket()
-        self.th_worker = threading.Thread(target=self.worker_listen)
+    def start(self, node):
+        self.th_worker = threading.Thread(target=self.worker_listen, args=(node,))
         self.th_worker.start()
-
-        self.th_apply = threading.Thread(target=self.apply_loop)
-        self.th_apply.start()
 
     def join(self):
         self.th_worker.join()
-        self.th_apply.join()
-        self.worker_listen_sock.close()
 
-    def worker_listen(self):
+    def worker_listen(self, node):
+        self.worker_listen_sock = socket.socket()
         self.worker_listen_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.worker_listen_sock.bind((self.node.ip, self.node.port))
+        self.worker_listen_sock.bind((node.ip, node.port))
         self.worker_listen_sock.listen(1)
-
         self.worker_listen_sock.settimeout(1)
+
         while True:
             try:
                 sock, addr = self.worker_listen_sock.accept()
-                wt = threading.Thread(target=self.process_work, args=(sock,))
+                wt = threading.Thread(target=self.process_work, args=(node, sock,))
                 wt.start()
             except socket.timeout:
-                if self.node.shutdown_flag:
+                if self.shutdown_flag:
+                    self.worker_listen_sock.close()
                     break
-                continue
 
     # inherit & extend this interface
     def init_handler(self):
@@ -56,26 +48,26 @@ class BaseWorker(object):
 
     def do_info(self, node, words):
         peers = {}
-        for nid, p in self.node.get_peers().items():
+        for nid, p in node.get_peers().items():
             peers[nid] = {'state': p.state, 'addr': p.addr, 'term': p.term, 'index': p.index}
 
-        info = {'nid': self.node.nid, 'state': self.node.state, 'term': self.node.term, 'index': self.node.index,
-                'peers': peers, 'last_checkpoint': self.node.last_checkpoint}
+        info = {'nid': node.nid, 'state': node.state, 'term': node.term, 'index': node.index,
+                'peers': peers, 'last_checkpoint': node.last_checkpoint}
         return str(info).replace("'", '"')
 
     def do_quit(self, node, words):
         return {'quit': True}
 
     def do_shutdown(self, node, words):
-        self.node.shutdown_flag = True
+        node.shutdown()
         return True
 
     def do_add_node(self, node, words):
-        self.node.add_node(words[1], words[2])
+        node.add_node(words[1], words[2])
         return True
 
     def do_del_node(self, node, words):
-        self.node.del_node(words[1])
+        node.del_node(words[1])
         return True
 
     def do_checkpoint(self, node, words):
@@ -83,11 +75,11 @@ class BaseWorker(object):
         if len(words) > 1:
             name = words[1]
 
-        self.node.checkpoint(name)
+        node.checkpoint(name)
         return True
 
     def do_getdump(self, node, words):
-        return self.node.get_snapshot()
+        return node.get_snapshot()
 
     def do_getlog(self, node, words):
         start = 0
@@ -103,101 +95,22 @@ class BaseWorker(object):
             if end == None:
                 raise ERROR_CAST
 
-        result = self.node.log.get_range(start, end)
+        result = node.log.get_range(start, end)
         return result.__repr__()
 
-    def propose(self, cmd):
-        handler = self.handler[cmd[0].lower()]
 
-        if 'e' in handler[1]:
-            if self.node.state == 'c':
-                self.node.log_warn('request while candidate')
-                raise Exception('temporary unavailable')
 
-            if self.node.state != 'l':
-                for nid, p in self.node.get_peers().items():
-                    if p.state == 'l':
-                        try:
-                            if not hasattr(p, 'req_io'):
-                                ip, port = p.addr.split(':')
-                                sock = socket.socket()
-                                sock.connect((ip, int(port)))
-                                p.req_io = resp.resp_io(sock)
-
-                            p.req_io.write(cmd)
-                            return p.req_io.read()
-                        except Exception as e:
-                            p.req_io.close()
-                            delattr(p, req_io)
-                            raise Exception('relay to leader has exception: %s', str(e))
-
-            f = Future(cmd)
-            self.node.q_entry.put(f)
-
-            ret = f.get(10)
-            if ret == ERROR_APPEND_ENTRY:
-                self.node.log_info('append_entry failed (%s)' % str(words))
-        else:
-            ret = handler[0](self.node, cmd)
-
-        return ret
-
-    def apply_loop(self):
-        i = 0
-        while True:
-            if self.node.shutdown_flag:
-                break
-
-            if i % 10 == 0:
-                # print self.node.get_snapshot()
-                pass
-            i += 1
-
-            if self.node.log.size() > CONF_LOG_MAX:
-                self.node.checkpoint()
-
-            item = self.node.log.pop(1)
-            if item == None:
-                continue
-
-            cmd = item.cmd
-            if isinstance(cmd, Future):
-                cmd = cmd.cmd
-
-            if self.node.index >= item.index:
-                self.node.log_info('skip log [%d:%d]: "%s"' % (self.node.index, item.index, str(cmd)))
-                continue
-
-            self.node.log_debug('apply command [%d]: "%s"' % (item.index, str(cmd)))
-
-            if cmd[0].lower() not in self.handler:
-                self.node.log_error('unknown command: "%s"' % str(cmd))
-                sys.exit(0)
-
-            handler = self.handler[cmd[0].lower()]
-
-            with self.node.data_lock:
-                try:
-                    ret = handler[0](self.node, cmd)
-                except Exception as e:
-                    ret = e
-
-                self.node.index = item.index
-
-            if isinstance(item.cmd, Future):
-                item.cmd.set(ret)
-
-    def process_work(self, sock):
+    def process_work(self, node, sock):
         rio = resp.resp_io(sock)
 
         while True:
-            if self.node.shutdown_flag:
+            if self.shutdown_flag:
                 rio.close()
                 return
 
             words = rio.read(1, split=True)
             if words == None:
-                self.node.log_info('disconnected')
+                node.log_info('disconnected')
                 rio.close()
                 return
 
@@ -221,7 +134,7 @@ class BaseWorker(object):
                     continue
 
                 try:
-                    ret = self.propose(words)
+                    ret = node.propose(words)
                 except Exception as e:
                     ret = e
 
@@ -230,6 +143,24 @@ class BaseWorker(object):
                     return
 
                 rio.write(ret)
+
+
+    def relay_cmd(self, leader, cmd):
+        p = leader
+        try:
+            if not hasattr(p, 'req_io'):
+                ip, port = p.addr.split(':')
+                sock = socket.socket()
+                sock.connect((ip, int(port)))
+                p.req_io = resp.resp_io(sock)
+
+            p.req_io.write(cmd)
+            return p.req_io.read()
+
+        except Exception as e:
+            p.req_io.close()
+            delattr(p, 'req_io')
+            raise Exception('relay to leader has exception: %s', str(e))
 
 
 class RaftWorker(BaseWorker):
@@ -266,14 +197,14 @@ class RaftWorker(BaseWorker):
 
     def do_lpush(self, node, words):
         key = words[1].strip()
-        self.node.check_ttl(key)
+        node.check_ttl(key)
 
         values = words[2:]
 
-        if key not in self.node.data:
-            self.node.data[key] = []
+        if key not in node.data:
+            node.data[key] = []
 
-        lobj = self.node.data[key]
+        lobj = node.data[key]
         if not isinstance(lobj, list):
             raise ERROR_TYPE
 
@@ -285,14 +216,14 @@ class RaftWorker(BaseWorker):
 
     def do_rpush(self, node, words):
         key = words[1].strip()
-        self.node.check_ttl(key)
+        node.check_ttl(key)
 
         values = words[2:]
 
-        if key not in self.node.data:
-            self.node.data[key] = []
+        if key not in node.data:
+            node.data[key] = []
 
-        lobj = self.node.data[key]
+        lobj = node.data[key]
 
         if not isinstance(lobj, list):
             raise ERROR_TYPE
@@ -304,10 +235,10 @@ class RaftWorker(BaseWorker):
 
     def do_rpop(self, node, words):
         key = words[1].strip()
-        self.node.check_ttl(key)
+        node.check_ttl(key)
 
-        if key in self.node.data:
-            lobj = self.node.data[key]
+        if key in node.data:
+            lobj = node.data[key]
 
             if not isinstance(lobj, list):
                 raise ERROR_TYPE
@@ -318,10 +249,10 @@ class RaftWorker(BaseWorker):
 
     def do_lpop(self, node, words):
         key = words[1].strip()
-        self.node.check_ttl(key)
+        node.check_ttl(key)
 
-        if key in self.node.data:
-            lobj = self.node.data[key]
+        if key in node.data:
+            lobj = node.data[key]
 
             if not isinstance(lobj, list):
                 raise ERROR_TYPE
@@ -332,13 +263,13 @@ class RaftWorker(BaseWorker):
 
     def do_lrange(self, node, words):
         key = words[1].strip()
-        self.node.check_ttl(key)
+        node.check_ttl(key)
 
         start = int(words[2])
         end = int(words[3]) + 1
 
-        if key in self.node.data:
-            lobj = self.node.data[key]
+        if key in node.data:
+            lobj = node.data[key]
 
             if not isinstance(lobj, list):
                 raise ERROR_TYPE
@@ -352,12 +283,12 @@ class RaftWorker(BaseWorker):
 
     def do_lindex(self, node, words):
         key = words[1].strip()
-        self.node.check_ttl(key)
+        node.check_ttl(key)
 
         index = int(words[2])
 
-        if key in self.node.data:
-            lobj = self.node.data[key]
+        if key in node.data:
+            lobj = node.data[key]
             if not isinstance(lobj, list):
                 raise ERROR_TYPE
 
@@ -367,10 +298,10 @@ class RaftWorker(BaseWorker):
 
     def do_llen(self, node, words):
         key = words[1].strip()
-        self.node.check_ttl(key)
+        node.check_ttl(key)
 
-        if key in self.node.data:
-            lobj = self.node.data[key]
+        if key in node.data:
+            lobj = node.data[key]
             if not isinstance(lobj, list):
                 raise ERROR_TYPE
 
@@ -380,13 +311,13 @@ class RaftWorker(BaseWorker):
 
     def do_lset(self, node, words):
         key = words[1].strip()
-        self.node.check_ttl(key)
+        node.check_ttl(key)
 
         index = int(words[2])
         value = words[3]
 
-        if key in self.node.data:
-            lobj = self.node.data[key]
+        if key in node.data:
+            lobj = node.data[key]
 
             if not isinstance(lobj, list):
                 raise ERROR_TYPE
@@ -397,13 +328,13 @@ class RaftWorker(BaseWorker):
 
     def do_lrem(self, node, words):
         key = words[1].strip()
-        self.node.check_ttl(key)
+        node.check_ttl(key)
 
         count = int(words[2])
         value = words[3]
 
-        if key in self.node.data:
-            lobj = self.node.data[key]
+        if key in node.data:
+            lobj = node.data[key]
 
             if not isinstance(lobj, list):
                 raise ERROR_TYPE
@@ -420,7 +351,7 @@ class RaftWorker(BaseWorker):
                 return org_len - len(lobj)
             elif count == 0:
                 l = [x for x in lobj if x != value]
-                self.node.data[key] = l
+                node.data[key] = l
                 return org_len - len(l)
             else:
                 raise ERROR_INVALID_PARAM
@@ -429,13 +360,13 @@ class RaftWorker(BaseWorker):
 
     def do_ltrim(self, node, words):
         key = words[1].strip()
-        self.node.check_ttl(key)
+        node.check_ttl(key)
 
         start = int(words[2])
         end = int(words[3]) + 1
 
-        if key in self.node.data:
-            lobj = self.node.data[key]
+        if key in node.data:
+            lobj = node.data[key]
 
             if not isinstance(lobj, list):
                 raise ERROR_TYPE
@@ -443,17 +374,17 @@ class RaftWorker(BaseWorker):
             if end == 0:
                 end = len(lobj)
             ret = lobj[start:end]
-            self.node.data[key] = lobj
+            node.data[key] = lobj
 
         return True
 
     def do_hgetall(self, node, words):
         key = words[1].strip()
-        self.node.check_ttl(key)
+        node.check_ttl(key)
 
         result = []
-        if key in self.node.data:
-            hobj = self.node.data[key]
+        if key in node.data:
+            hobj = node.data[key]
 
             if not isinstance(hobj, dict):
                 raise ERROR_TYPE
@@ -466,11 +397,11 @@ class RaftWorker(BaseWorker):
 
     def do_hdel(self, node, words):
         key = words[1].strip()
-        self.node.check_ttl(key)
+        node.check_ttl(key)
 
         count = 0
-        if key in self.node.data:
-            hobj = self.node.data[key]
+        if key in node.data:
+            hobj = node.data[key]
 
             if not isinstance(hobj, dict):
                 raise ERROR_TYPE
@@ -483,12 +414,12 @@ class RaftWorker(BaseWorker):
 
     def do_hset(self, node, words):
         key = words[1].strip()
-        self.node.check_ttl(key)
+        node.check_ttl(key)
 
-        if key not in self.node.data:
-            self.node.data[key] = {}
+        if key not in node.data:
+            node.data[key] = {}
 
-        hobj = self.node.data[key]
+        hobj = node.data[key]
         if not isinstance(hobj, dict):
             raise ERROR_TYPE
 
@@ -498,10 +429,10 @@ class RaftWorker(BaseWorker):
 
     def do_hlen(self, node, words):
         key = words[1].strip()
-        self.node.check_ttl(key)
+        node.check_ttl(key)
 
-        if key in self.node.data:
-            hobj = self.node.data[key]
+        if key in node.data:
+            hobj = node.data[key]
             if not isinstance(hobj, dict):
                 raise ERROR_TYPE
 
@@ -511,10 +442,10 @@ class RaftWorker(BaseWorker):
 
     def do_hget(self, node, words):
         key = words[1].strip()
-        self.node.check_ttl(key)
+        node.check_ttl(key)
 
-        if key in self.node.data:
-            hobj = self.node.data[key]
+        if key in node.data:
+            hobj = node.data[key]
 
             if not isinstance(hobj, dict):
                 raise ERROR_TYPE
@@ -528,10 +459,10 @@ class RaftWorker(BaseWorker):
 
     def do_get(self, node, words):
         key = words[1].strip()
-        self.node.check_ttl(key)
+        node.check_ttl(key)
 
-        if key in self.node.data:
-            value = self.node.data[key]
+        if key in node.data:
+            value = node.data[key]
             if not isinstance(value, str):
                 raise ERROR_TYPE
 
@@ -541,48 +472,48 @@ class RaftWorker(BaseWorker):
 
     def do_del(self, node, words):
         key = words[1].strip()
-        if key in self.node.data:
-            del self.node.data[key]
-            self.node.clear_ttl(key)
+        if key in node.data:
+            del node.data[key]
+            node.clear_ttl(key)
             return 1
 
         return 0
 
     def do_set(self, node, words):
-        self.node.data[words[1]] = words[2]
-        self.node.clear_ttl(words[1])
+        node.data[words[1]] = words[2]
+        node.clear_ttl(words[1])
         return True
 
     # TODO: cleanup expired by backgroud thread
-    def pexpireat(self, key, ts):
+    def pexpireat(self, node, key, ts):
         ts = float(ts) / 1000.0
-        return self.node.set_ttl(key, ts)
+        return node.set_ttl(key, ts)
 
     def do_pexpireat(self, node, words):
         ts = intcast(words[2])
         if ts == None:
             raise ERROR_CAST
 
-        return self.pexpreat(words[1], ts)
+        return self.pexpreat(node, words[1], ts)
 
     def do_pexpire(self, node, words):
         msec = intcast(words[2])
         if msec == None:
             raise ERROR_CAST
 
-        return self.pexpireat(words[1], int(time.time() * 1000) + msec)
+        return self.pexpireat(node, words[1], int(time.time() * 1000) + msec)
 
     def do_expireat(self, node, words):
         ts = intcast(words[2])
         if ts == None:
             raise ERROR_CAST
 
-        return self.pexpreat(words[1], ts * 1000)
+        return self.pexpreat(node, words[1], ts * 1000)
 
     def do_expire(self, node, words):
         sec = intcast(words[2])
         if sec == None:
             raise ERROR_CAST
 
-        return self.pexpireat(words[1], int(time.time() * 1000) + (sec * 1000))
+        return self.pexpireat(node, words[1], int(time.time() * 1000) + (sec * 1000))
 

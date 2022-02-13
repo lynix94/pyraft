@@ -26,6 +26,9 @@ class LogFile(object):
         self.start = 0
         self.end = 0
 
+    def close(self):
+        self.fh.close()
+
     def delete(self):
         self.fh.close()
         os.remove(self.fn)
@@ -135,6 +138,10 @@ class LogFileStorage(object):
 
         return count
 
+    def close(self):
+        for lf in self.file_list:
+            lf.close()
+
 
 class RaftLog(object):
     def __init__(self, nid):
@@ -216,5 +223,9 @@ class RaftLog(object):
 
     def get_term(self):
         return self.term
+
+    def close(self):
+        self.log.close()
+
 
 
