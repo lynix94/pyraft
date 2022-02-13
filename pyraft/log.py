@@ -34,7 +34,7 @@ class LogFile(object):
         os.remove(self.fn)
 
     def append(self, item):
-        self.fh.write(resp.encoding(item.to_list()))
+        self.fh.write(resp.resp_encoding(item.to_list()))
         self.fh.flush()
         self.count += 1
 
@@ -49,7 +49,7 @@ class LogFile(object):
         remain = fh.read()
 
         while True:
-            l, remain = resp.decoding(remain)
+            l, remain = resp.resp_decoding(remain)
             if l == None:
                 break
 

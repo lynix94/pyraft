@@ -164,7 +164,7 @@ class RaftNode(object):
 
 
 			while True:
-				l, remain = resp.decoding(remain)
+				l, remain = resp.resp_decoding(remain)
 				if l == None:
 					break
 

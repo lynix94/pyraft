@@ -1,8 +1,9 @@
 import socket
 import select
 
+from pyraft.common import *
 
-def encoding(msg):
+def resp_encoding(msg):
 	if isinstance(msg, bool) and msg == True:
 		return '+OK\r\n'
 
@@ -24,7 +25,7 @@ def encoding(msg):
 	if isinstance(msg, list) or isinstance(msg, tuple):
 		result = ['*%d\r\n' % len(msg)]
 		for item in msg:
-			result.append(encoding(item))  
+			result.append(resp_encoding(item))
 
 		return ''.join(result)
 			
@@ -33,7 +34,7 @@ def encoding(msg):
 
 	return '-unknown resp type\r\n'
 
-def decoding(src):
+def resp_decoding(src):
 	#print 'decoding >>>> "%s"' % src
 	if len(src) == 0:
 		return None, src
@@ -45,7 +46,7 @@ def decoding(src):
 
 		result = []
 		for i in range(count):
-			item, remain = decoding(remain)
+			item, remain = resp_decoding(remain)
 			if item == None:
 				return None, src
 
@@ -94,114 +95,24 @@ def decoding(src):
 	return toks[0], toks[1]
 
 
-class resp_io:
+class resp_io(base_io):
 	def __init__(self, sock):
-		self.sock = sock
-		self.buff = ''
-		self.timeout = -1
+		super(resp_io, self).__init__(sock)
 
-	def connected(self):
-		return self.sock != None
-
-	def raw_write(self, msg):
-		if self.sock == None:
-			return None
-
+	def raw_encode(self, msg):
 		if not msg.endswith('\r\n'):
 			msg += '\r\n'
 
-		try:
-			ret = self.sock.send(msg.encode())
-		except socket.error:
-			self.close()
-			return None
+		return msg
 
-		if ret == 0:
-			self.close()
-			return None
+	def encode(self, msg):
+		return resp_encoding(msg)
 
-		return ret
+	def decode(self, msg):
+		return resp_decoding(msg)
 
-	def write(self, msg):
-		if self.sock == None:
-			return None
+	def decodable(self, buff):
+		if '\r\n' in buff:
+			return True
 
-		try:
-			ret = self.sock.send(encoding(msg).encode())
-			if ret == 0:
-				self.close()
-				return None
-			return ret
-				
-		except socket.error:
-			self.close()
-			return None
-
-	def read(self, timeout = None):
-		if self.sock == None:
-			return None
-
-		while True:
-			if self.buff.find('\r\n') < 0:
-				if timeout != None:
-					reads, writes, excepts = select.select([self.sock], [], [], timeout)
-					if len(reads) == 0:
-						return ''
-
-				try:
-					tmp = self.sock.recv(4096).decode('utf-8')
-				except socket.error:
-					self.close()
-					return None
-
-				if tmp == '':
-					self.close()
-					return None
-				
-				self.buff += tmp
-
-			result, self.buff = decoding(self.buff)
-			if result == None:
-				if timeout != None:
-					reads, writes, excepts = select.select([self.sock], [], [], timeout)
-					if len(reads) == 0:
-						return ''
-
-				try:
-					tmp = self.sock.recv(4096).decode('utf-8')
-				except socket.error:
-					self.close()
-					return None
-
-				if tmp == '':
-					self.close()
-					return None
-				
-				self.buff += tmp
-				continue
-
-			return result
-
-	def read_all(self, timeout=None):
-		result = []
-
-		while True:
-			ret = self.read(timeout)
-			if ret == None:
-				return None
-
-			if ret == '':
-				break
-
-			result.append(ret)
-			item, remain = decoding(self.buff)
-			if item == None:
-				break
-
-		return result
-
-	def close(self):
-		if self.sock != None:
-			self.sock.close()
-
-		self.sock = None
+		return False
