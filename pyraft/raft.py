@@ -277,7 +277,7 @@ class RaftNode(object):
 
 			peer.raft_req = resp.resp_io(sock)
 			self.log_info('connect to %s' % (nid))
-			peer.raft_req.write('id %s %s %d' % (self.nid, self.addr, self.index), inline=True)
+			peer.raft_req.raw_write('id %s %s %d' % (self.nid, self.addr, self.index))
 
 			peers = peer.raft_req.read(1)
 			if not isinstance(peers, list):
@@ -295,10 +295,13 @@ class RaftNode(object):
 		nid = None
 		
 		rio = resp.resp_io(sock)
-		words = rio.read(1, split=True)
+		words = rio.read(1)
 		if words == None or words == '':
 			rio.close()
 			return
+
+		if isinstance(words, str):
+			words = words.split()
 
 		if len(words) == 4 and words[0] == 'id':
 			nid = words[1]
@@ -468,11 +471,14 @@ class RaftNode(object):
 			if timeout > 0 and now - start > timeout:
 				break
 				
-			msg_list = p.raft_req.read_all(0.0, split=True)
+			msg_list = p.raft_req.read_all(0.0)
 			if msg_list == None:
 				return
 
 			for toks in msg_list:
+				if isinstance(toks, str):
+					toks = toks.split()
+
 				if toks[0] == 'ack':
 					index = intcast(toks[1])
 					if index == None:
@@ -495,11 +501,14 @@ class RaftNode(object):
 
 		peers = self.select_peer_req(1.0)
 		for p in peers:
-			msg_list = p.raft_wait.read_all(split=True)
+			msg_list = p.raft_wait.read_all()
 			if msg_list == None or msg_list == []:
 				continue
 
 			for toks in msg_list:
+				if isinstance(toks, str):
+					toks = toks.split()
+
 				if toks[0] == 'vote':
 					term = intcast(toks[1].strip())
 					if term == None:
@@ -544,11 +553,14 @@ class RaftNode(object):
 		# process vote
 		peers = self.select_peer_req(vote_wait_timeout)
 		for p in peers:
-			msg_list = p.raft_wait.read_all(split=True)
+			msg_list = p.raft_wait.read_all()
 			if msg_list == None or msg_list == []:
 				continue
 
 			for toks in msg_list:
+				if isinstance(toks, str):
+					toks = toks.split()
+
 				if toks[0] == 'vote':
 					term = intcast(toks[1].strip())
 					if term == None:
@@ -570,11 +582,14 @@ class RaftNode(object):
 
 		if voted:
 			for nid, p in self.get_peers().items():
-				msg_list = p.raft_wait.read_all(wait_remaining, split=True)
+				msg_list = p.raft_wait.read_all(wait_remaining)
 				if msg_list == None or msg_list == []:
 					continue
 
 				for toks in msg_list:
+					if isinstance(toks, str):
+						toks = toks.split()
+
 					if self.handle_request(p, toks):
 						return # elected
 
@@ -593,11 +608,14 @@ class RaftNode(object):
 				if nid in get_result:
 					continue
 
-				msg_list = p.raft_req.read_all(i*(CONF_VOTING_TIME/2), split=True)
+				msg_list = p.raft_req.read_all(i*(CONF_VOTING_TIME/2))
 				if msg_list == None or msg_list == []:
 					continue
 
 				for toks in msg_list:
+					if isinstance(toks, str):
+						toks = toks.split()
+
 					if toks[0] == 'yes':
 						voters.append(nid)
 						count+=1
@@ -692,11 +710,14 @@ class RaftNode(object):
 		# read peer request if exists
 		peers = self.select_peer_req(0.0)
 		for p in peers:
-			msg_list = p.raft_wait.read_all(split=True)
+			msg_list = p.raft_wait.read_all()
 			if msg_list == None or msg_list == []:
 				continue
 
 			for toks in msg_list:
+				if isinstance(toks, str):
+					toks = toks.split()
+
 				if toks[0] == 'vote':
 					p.raft_wait.write('no')
 				else:

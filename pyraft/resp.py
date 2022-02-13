@@ -94,8 +94,6 @@ def decoding(src):
 	return toks[0], toks[1]
 
 
-
-
 class resp_io:
 	def __init__(self, sock):
 		self.sock = sock
@@ -105,28 +103,31 @@ class resp_io:
 	def connected(self):
 		return self.sock != None
 
-	def write(self, msg, inline=False):
+	def raw_write(self, msg):
 		if self.sock == None:
 			return None
 
-		if inline:
-			if not msg.endswith('\r\n'):
-				msg += '\r\n'
-
-			try:
-				ret = self.sock.send(msg.encode())
-			except socket.error:
-				self.close()
-				return None
-
-			if ret == 0:
-				self.close()
-				return None
-
-			return ret
+		if not msg.endswith('\r\n'):
+			msg += '\r\n'
 
 		try:
-			ret =  self.sock.send(encoding(msg).encode())
+			ret = self.sock.send(msg.encode())
+		except socket.error:
+			self.close()
+			return None
+
+		if ret == 0:
+			self.close()
+			return None
+
+		return ret
+
+	def write(self, msg):
+		if self.sock == None:
+			return None
+
+		try:
+			ret = self.sock.send(encoding(msg).encode())
 			if ret == 0:
 				self.close()
 				return None
@@ -136,8 +137,7 @@ class resp_io:
 			self.close()
 			return None
 
-
-	def read(self, timeout = None, split=False):
+	def read(self, timeout = None):
 		if self.sock == None:
 			return None
 
@@ -180,17 +180,13 @@ class resp_io:
 				self.buff += tmp
 				continue
 
-			if split == True and isinstance(result, str):
-				result = result.strip().split(' ')
-
 			return result
 
-
-	def read_all(self, timeout=None, split=False):
+	def read_all(self, timeout=None):
 		result = []
 
 		while True:
-			ret = self.read(timeout, split)
+			ret = self.read(timeout)
 			if ret == None:
 				return None
 
@@ -204,17 +200,8 @@ class resp_io:
 
 		return result
 
-
 	def close(self):
 		if self.sock != None:
 			self.sock.close()
 
 		self.sock = None
-
-
-
-
-
-
-
-
