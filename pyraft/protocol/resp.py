@@ -1,7 +1,6 @@
-import socket
-import select
 
 from pyraft.common import *
+from pyraft.protocol.base import base_io
 
 def resp_encoding(msg):
 	if isinstance(msg, bool) and msg == True:

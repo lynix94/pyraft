@@ -1,7 +1,7 @@
 import threading, queue
 
 from pyraft.common import *
-from pyraft import resp
+from pyraft.protocol import resp
 
 class LogItem(object):
     def __init__(self, term, index, ts, cmd):

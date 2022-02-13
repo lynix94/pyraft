@@ -3,10 +3,10 @@ import random, queue
 from datetime import datetime
 
 from pyraft.common import *
-from pyraft import resp
+from pyraft.protocol import resp
 from pyraft.log import RaftLog
 from pyraft.log import LogItem
-from pyraft.worker import RaftWorker
+from pyraft.worker.redis_worker import RedisWorker
 
 class RaftNode(object):
 	def __init__(self, nid, addr, ensemble={}, peer = False):
@@ -39,7 +39,7 @@ class RaftNode(object):
 		self.peer_lock = threading.Lock()
 
 		self.log = RaftLog(nid)
-		self.worker = RaftWorker()
+		self.worker = RedisWorker()
 		self.data = {}
 		self.data_lock = threading.Lock()
 		self.data['ttl'] = {}

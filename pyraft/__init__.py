@@ -1,7 +1,7 @@
 
 from pyraft import raft
-from pyraft import resp
+from pyraft.protocol import resp
 
 __all__ = ['raft', 'resp']
-__version__ = '0.1.4'
+__version__ = '0.2.0'
 
