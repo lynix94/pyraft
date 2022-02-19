@@ -4,10 +4,10 @@ from pyraft.common import *
 from pyraft.worker.base_worker import BaseWorker
 
 
-
+# worker for data handling with redis interface
 class RedisWorker(BaseWorker):
-    def __init__(self):
-        super(RedisWorker, self).__init__()
+    def __init__(self, addr):
+        super(RedisWorker, self).__init__(addr)
         self.init_redis_handler()
 
     def init_redis_handler(self):

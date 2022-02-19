@@ -6,10 +6,11 @@ from pyraft.common import *
 from pyraft.protocol import resp
 from pyraft.log import RaftLog
 from pyraft.log import LogItem
+from pyraft.worker.worker import CompositeWorker
 from pyraft.worker.redis_worker import RedisWorker
 
 class RaftNode(object):
-	def __init__(self, nid, addr, ensemble={}, peer = False):
+	def __init__(self, nid, addr, ensemble={}, peer = False, worker = None):
 		# raft node & peer common
 		self.nid = nid
 		self.term = 0
@@ -39,7 +40,11 @@ class RaftNode(object):
 		self.peer_lock = threading.Lock()
 
 		self.log = RaftLog(nid)
-		self.worker = RedisWorker()
+
+		self.worker = worker
+		if worker is None:
+			self.worker = RedisWorker(self.addr)
+
 		self.data = {}
 		self.data_lock = threading.Lock()
 		self.data['ttl'] = {}
@@ -52,10 +57,7 @@ class RaftNode(object):
 			self.add_node(pid, paddr)
 
 	def get_handler(self, name):
-		if name not in self.worker.handler:
-			return None
-
-		return self.worker.handler[name]
+		return self.worker.get_handler(name)
 
 	def get_handler_func(self, name): # return function only
 		handler = self.get_handler(name)
@@ -867,13 +869,12 @@ class RaftNode(object):
 
 from optparse import OptionParser
 
-def make_default_node():
+def make_redis_node():
 	parser = OptionParser()
 	parser.add_option('-e', '--ensemble', dest='ensemble', help='ensemble list')
 	parser.add_option('-a', '--addr', dest='addr', help='ip:port[port+1]')
 	parser.add_option('-i', '--nid', dest='nid', help='self node id')
 	parser.add_option('-l', '--load', dest='load', help='checkpoint filename to load')
-
 
 	(options, args) = parser.parse_args()
 
@@ -911,4 +912,8 @@ def make_default_node():
 		node.load(options.load)
 
 	return node
-	
+
+def make_default_node(): # redis interface node is default now
+	return make_redis_node()
+
+

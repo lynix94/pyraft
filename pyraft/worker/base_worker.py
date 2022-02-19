@@ -1,12 +1,11 @@
-import time
-
 from pyraft.common import *
 from pyraft.worker.worker import Worker
 
 
+# worker for basic control (info, shutdown, add_node, del_node etc)
 class BaseWorker(Worker):
-    def __init__(self):
-        super(BaseWorker, self).__init__()
+    def __init__(self, addr):
+        super(BaseWorker, self).__init__(addr)
         self.init_base_handler()
 
     # inherit & extend this interface
