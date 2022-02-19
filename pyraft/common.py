@@ -9,29 +9,6 @@ CONF_LOG_FILE_MAX = 10000
 CONF_VOTING_TIME = 1.0
 CONF_PING_TIMEOUT = 5  # re-elect leader after CONF_PING_TIMEOUT
 
-g_log_level = 0
-g_log_handle = sys.stdout
-
-def log_write(log):
-    global g_log_handle
-    g_log_handle.write(log)
-
-def set_log_level(level):  # debug, info, warn, error
-    global g_log_level
-
-    if level.lower().startswith('debug'):
-        g_log_level = 0
-    elif level.lower().startswith('info'):
-        g_log_level = 1
-    elif level.lower().startswith('warn'):
-        g_log_level = 2
-    elif level.lower().startswith('err'):
-        g_log_level = 3
-
-def get_log_level():
-    global g_log_level
-    return g_log_level
-
 def intcast(src):
     if isinstance(src, int):
         return src

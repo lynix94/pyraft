@@ -1,5 +1,5 @@
 import time, threading, socket, select
-import random, queue
+import random, queue, logging
 from datetime import datetime
 
 from pyraft.common import *
@@ -34,6 +34,7 @@ class RaftNode(object):
 			return
 
 		# raft node only
+		self.logger = logging.getLogger('pyraft')
 		self.shutdown_flag = False
 
 		self.peers = {}
@@ -818,25 +819,20 @@ class RaftNode(object):
 	# log, etc
 	#
 	def log_debug(self, msg):
-		if get_log_level() <= 0:
-			log = '[DEBUG][%s-%d(%s):%s] %s\n' % (self.nid, self.term, self.state, datetime.now(), msg)
-			log_write(log)
+		log = '[%s-%d(%s)] %s' % (self.nid, self.term, self.state, msg)
+		self.logger.debug(log)
 
 	def log_info(self, msg):
-		if get_log_level() <= 1:
-			log = '[INFO][%s-%d(%s):%s] %s\n' % (self.nid, self.term, self.state, datetime.now(), msg)
-			log_write(log)
+		log = '[%s-%d(%s)] %s' % (self.nid, self.term, self.state, msg)
+		self.logger.info(log)
 
 	def log_warn(self, msg):
-		if get_log_level() <= 2:
-			log = '[WARN][%s-%d(%s):%s] %s\n' % (self.nid, self.term, self.state, datetime.now(), msg)
-			log_write(log)
+		log = '[%s-%d(%s)] %s' % (self.nid, self.term, self.state, msg)
+		self.logger.warning(log)
 
 	def log_error(self, msg):
-		if get_log_level() <= 3:
-			log = '[ERROR][%s-%d(%s):%s] %s\n' % (self.nid, self.term, self.state, datetime.now(), msg)
-			log_write(log)
-
+		log = '[%s-%d(%s)] %s' % (self.nid, self.term, self.state, msg)
+		self.logger.error(log)
 
 	def check_ttl(self, key):
 		if key in self.ttl:

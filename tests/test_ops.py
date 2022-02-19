@@ -11,8 +11,6 @@ class TestOPS(unittest.TestCase):
 	def test_ops(self):
 		nodes = []
 
-		raft.set_log_level('info')
-
 		n1 = test.make_test_node(1, nodes) # 1 is leader
 		n1.start()
 

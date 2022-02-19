@@ -11,8 +11,6 @@ class TestRecover(unittest.TestCase):
 	def test_recover(self):
 		nodes = []
 
-		raft.set_log_level('info')
-
 		n = test.make_test_node(1, nodes) # 1 is leader
 		n.start()
 		nodes.append(n)
