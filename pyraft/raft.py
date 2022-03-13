@@ -55,6 +55,9 @@ class RaftNode(object):
 			if pid == nid:
 				continue
 
+			if addr == paddr:
+				continue
+
 			self.add_node(pid, paddr)
 
 	def get_handler(self, name):
