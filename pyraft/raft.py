@@ -867,7 +867,7 @@ from optparse import OptionParser
 
 def make_redis_node():
 	parser = OptionParser()
-	parser.add_option('-e', '--ensemble', dest='ensemble', help='ensemble list')
+	parser.add_option('-e', '--ensemble', dest='ensemble', help='ensemble ip list or domain name with port')
 	parser.add_option('-a', '--addr', dest='addr', help='ip:port[port+1]')
 	parser.add_option('-i', '--nid', dest='nid', help='self node id')
 	parser.add_option('-l', '--load', dest='load', help='checkpoint filename to load')
@@ -880,6 +880,7 @@ def make_redis_node():
 		print('python3 %s -a IP:PORT [-i NODE_ID] [-e ENSEMBLE_LIST] [-l CHECKPOINT_FILE]' % sys.argv[0])
 		print('  ex) python3 %s -a 127.0.0.1:5010 -i 1 -e 2/127.0.0.1:5020,3/127.0.0.1:5030' % sys.argv[0])
 		print('  ex) python3 %s -a 127.0.0.1:5010 -i 1 -e 127.0.0.1:5020,127.0.0.1:5030' % sys.argv[0])
+		print('  ex) python3 %s -a 127.0.0.1:5010 -i 1 -e pyraft.test.com:5010' % sys.argv[0])
 		sys.exit(-1)
 
 	if options.nid == None:
@@ -888,20 +889,38 @@ def make_redis_node():
 	ensemble = {}
 
 	if options.ensemble != None:
-		toks = options.ensemble.split(',')
-		for tok in toks:
-			etoks = tok.split('/')
-			if len(etoks) == 2:
-				nid = etoks[0]
-				addr = etoks[1]
-				ensemble[nid] = addr
-			elif len(etoks) == 1:
-				addr = tok
-				ensemble['__TEMP_%s__' % addr] = addr
-			else:
-				print('invalid ensemble format')
+		is_domain_name = False
+		for c in options.ensemble:
+			if c.isalpha():
+				is_domain_name = True
+				break
+
+		if is_domain_name:
+			if ':' not in options.ensemble:
+				print('domain name ensemble should include port')
 				sys.exit(-1)
 
+			domain_name, port = options.ensemble.split(':', 1)
+			host, alias, ip_list = socket.gethostbyname_ex(domain_name)
+			for ip in ip_list:
+				addr = '%s:%d' % (ip, int(port))
+				ensemble['__TEMP_%s__' % addr] = addr
+		else:
+			toks = options.ensemble.split(',')
+			for tok in toks:
+				etoks = tok.split('/')
+				if len(etoks) == 2:
+					nid = etoks[0]
+					addr = etoks[1]
+					ensemble[nid] = addr
+				elif len(etoks) == 1:
+					addr = tok
+					ensemble['__TEMP_%s__' % addr] = addr
+				else:
+					print('invalid ensemble format')
+					sys.exit(-1)
+
+	print(ensemble)
 	node = RaftNode(options.nid, options.addr, ensemble)
 	
 	if options.load != None:
