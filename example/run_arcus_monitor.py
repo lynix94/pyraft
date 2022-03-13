@@ -1,20 +1,13 @@
 import os, sys, time, copy
-import threading
+import threading, argparse
 import asyncio
-import logging
-from logging.handlers import RotatingFileHandler
+
 from pyraft import raft
-
-
 from kazoo.client import KazooClient
-from kazoo.exceptions import NoNodeError
-from kazoo.exceptions import NodeExistsError
-
-
 
 class ArcusMonitor(raft.RaftNode):
-	def __init__(self, nid, ensemble, zk_addr, service_code):
-		super(ArcusMonitor, self).__init__(nid, ensemble)
+	def __init__(self, nid, addr, ensemble, zk_addr, service_code):
+		super(ArcusMonitor, self).__init__(nid, addr, ensemble)
 
 		self.zk_addr = zk_addr
 		self.service_code = service_code
@@ -23,7 +16,6 @@ class ArcusMonitor(raft.RaftNode):
 		self.cool_down_time = 0
 		self.failover_count = 0
 		self.failover_count_limit = 3
-
 
 	def do_failover(self, addr):
 		self.log_info('process failover: %s' % addr)
@@ -112,7 +104,7 @@ class ArcusMonitor(raft.RaftNode):
 				if len(jobs) > 10:
 					await asyncio.wait(jobs) # python asyncio has overhead for huge list (as I tested)
 					jobs = []
-		
+
 				if len(jobs) > 0:
 					await asyncio.wait(jobs)
 					jobs = []
@@ -178,17 +170,15 @@ class ArcusMonitor(raft.RaftNode):
 			raise Exception('invalid sub command')
 
 
+if __name__ == '__main__':
+	parser = argparse.ArgumentParser()
+	parser.add_argument('-zk', dest='zk_addr', required=True, help='zookeeper address')
+	parser.add_argument('-cloud', dest='cloud', required=True, help='cloud (service code) name')
 
-logger = logging.getLogger('pyraft')
-logger.setLevel(logging.DEBUG)
+	args = raft.parse_default_args(parser)
 
-handler = RotatingFileHandler('./monitor.log', maxBytes=1024*10, backupCount=3)
-formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
-handler.setFormatter(formatter)
-logger.addHandler(handler)
-
-node = ArcusMonitor('1', '127.0.0.1:5010', sys.argv[1], sys.argv[2])
-node.worker.handler['control'] = [node.do_control, 'we', 1, -1]
-node.start()
-node.join()
+	node = ArcusMonitor(args.nid, args.addr, args.ensemble_map, args.zk_addr, args.cloud)
+	node.worker.handler['control'] = [node.do_control, 'we', 1, -1]
+	node.start()
+	node.join()
 

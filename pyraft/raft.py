@@ -1,6 +1,8 @@
 import time, threading, socket, select
-import random, queue, logging
-from datetime import datetime
+import random, queue
+import argparse
+import logging
+from logging.handlers import RotatingFileHandler
 
 from pyraft.common import *
 from pyraft.protocol import resp
@@ -866,50 +868,65 @@ class RaftNode(object):
 		return ret
 
 
-from optparse import OptionParser
+def parse_default_args(parser):
+	parser.add_argument('-a', dest='addr', help='ip:port[port+1] (ex. -a 127.0.0.1:5010)')
+	parser.add_argument('-e', dest='ensemble', help='ensemble ip list or domain name with port (ex. -e 2/127.0.0.1:5020,3/127.0.0.1:5030 or -e 127.0.0.1:5020,127.0.0.1:5030 or -e pyraft.test.com:5010)')
+	parser.add_argument('-i', dest='nid', help='self node id (if not exists, use address) (ex. -i 1)')
+	parser.add_argument('-l', dest='load', help='checkpoint filename to load')
+	parser.add_argument('-loglevel', dest='loglevel', default='info', help='loglevel (debug, info, warning, error, fatal)')
+	parser.add_argument('-logfile', dest='logfile', help='logger rotation file')
 
-def make_redis_node():
-	parser = OptionParser()
-	parser.add_option('-e', '--ensemble', dest='ensemble', help='ensemble ip list or domain name with port')
-	parser.add_option('-a', '--addr', dest='addr', help='ip:port[port+1]')
-	parser.add_option('-i', '--nid', dest='nid', help='self node id')
-	parser.add_option('-l', '--load', dest='load', help='checkpoint filename to load')
+	args = parser.parse_args()
 
-	(options, args) = parser.parse_args()
+	## process log level & log file
+	if args.loglevel.lower() != 'warning':
+		logger = logging.getLogger('pyraft')
 
-	#print options
+		if args.loglevel.lower() == 'debug':
+			logger.setLevel(logging.DEBUG)
+		elif args.loglevel.lower() == 'info':
+			logger.setLevel(logging.INFO)
+		elif args.loglevel.lower() == 'error':
+			logger.setLevel(logging.ERROR)
+		elif args.loglevel.lower() == 'fatal':
+			logger.setLevel(logging.FATAL)
+		else:
+			raise Exception('unknown log level')
 
-	if options.addr == None:
-		print('python3 %s -a IP:PORT [-i NODE_ID] [-e ENSEMBLE_LIST] [-l CHECKPOINT_FILE]' % sys.argv[0])
-		print('  ex) python3 %s -a 127.0.0.1:5010 -i 1 -e 2/127.0.0.1:5020,3/127.0.0.1:5030' % sys.argv[0])
-		print('  ex) python3 %s -a 127.0.0.1:5010 -i 1 -e 127.0.0.1:5020,127.0.0.1:5030' % sys.argv[0])
-		print('  ex) python3 %s -a 127.0.0.1:5010 -i 1 -e pyraft.test.com:5010' % sys.argv[0])
-		sys.exit(-1)
+	if args.logfile is not None:
+		handler = RotatingFileHandler(args.logfile, maxBytes=1024*1024, backupCount=10)
+		formatter = logging.Formatter('%(asctime)s [%(levelname)s] %(message)s')
+		handler.setFormatter(formatter)
+		logger.addHandler(handler)
 
-	if options.nid == None:
-		options.nid = options.addr
+	## process ensemble
+	if args.addr == None:
+		parser.print_help()
+		raise Exception('addr is required')
+
+	if args.nid == None:
+		args.nid = args.addr
 
 	ensemble = {}
-
-	if options.ensemble != None:
+	if args.ensemble != None:
 		is_domain_name = False
-		for c in options.ensemble:
+		for c in args.ensemble:
 			if c.isalpha():
 				is_domain_name = True
 				break
 
 		if is_domain_name:
-			if ':' not in options.ensemble:
+			if ':' not in args.ensemble:
 				print('domain name ensemble should include port')
 				sys.exit(-1)
 
-			domain_name, port = options.ensemble.split(':', 1)
+			domain_name, port = args.ensemble.split(':', 1)
 			host, alias, ip_list = socket.gethostbyname_ex(domain_name)
 			for ip in ip_list:
 				addr = '%s:%d' % (ip, int(port))
 				ensemble['__TEMP_%s__' % addr] = addr
 		else:
-			toks = options.ensemble.split(',')
+			toks = args.ensemble.split(',')
 			for tok in toks:
 				etoks = tok.split('/')
 				if len(etoks) == 2:
@@ -923,11 +940,16 @@ def make_redis_node():
 					print('invalid ensemble format')
 					sys.exit(-1)
 
-	print(ensemble)
-	node = RaftNode(options.nid, options.addr, ensemble)
+	#print(ensemble)
+	args.ensemble_map = ensemble
+	return args
+
+def make_redis_node():
+	args = parse_default_args(argparse.ArgumentParser())
+	node = RaftNode(args.nid, args.addr, args.ensemble_map)
 	
-	if options.load != None:
-		node.load(options.load)
+	if args.load != None:
+		node.load(args.load)
 
 	return node
 
