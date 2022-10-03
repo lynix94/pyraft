@@ -1,4 +1,4 @@
-import os, sys, time, copy
+import os, sys, time, copy, re
 import threading, argparse
 import asyncio
 
@@ -10,19 +10,38 @@ class ArcusMonitor(raft.RaftNode):
 		super(ArcusMonitor, self).__init__(nid, addr, ensemble)
 
 		self.zk_addr = zk_addr
-		self.service_code = service_code
+		self.re_service_code = re.compile(service_code)
 		self.repeated_fail_map = {}
-		self.failover_thread_hold = 5
-		self.cool_down_time = 0
+		self.check_list_map = {}
+
+		self.failover_threshold = 5
 		self.failover_count = 0
-		self.failover_count_limit = 3
+		self.failover_count_limit = 10
+
+		self.cooldown_time = 0
+		self.cooldown_start = 0
 
 	def do_failover(self, addr):
 		self.log_info('process failover: %s' % addr)
 
+		if self.cooldown_start > 0:
+			if (time.time() - self.cooldown_start) > self.cooldown_time: # cooldown end
+				self.log_info('cooldown time is over')
+				self.failover_count = 0
+				self.cooldown_start = 0
+			else:
+				self.log_info('skip failover because of cooldown time')
+				return
+
+		if self.failover_count > self.failover_count_limit: # start cooldown
+			self.log_info('failover count exceeds limit %d. start cooldown time' % self.failover_count_limit)
+			self.cooldown_start = time.time()
+			return
+
 		try:
-			self.log_info('## delete /arcus/cache_list/%s/%s' % (self.service_code, addr))
-			self.zk.delete('/arcus/cache_list/%s/%s' % (self.service_code, addr))
+			service_code = self.check_list_map[addr]
+			self.log_info('delete /arcus/cache_list/%s/%s' % (service_code, addr))
+			self.zk.delete('/arcus/cache_list/%s/%s' % (service_code, addr))
 			self.failover_count += 1
 
 		except Exception as e:
@@ -33,8 +52,7 @@ class ArcusMonitor(raft.RaftNode):
 		pass
 
 	def do_make_decision(self):
-
-		for addr in copy.deepcopy(self.check_list):
+		for addr in self.check_list_map.keys():
 			result = self.request('hgetall', 'hc_%s' % addr)
 			opinions = {}
 			for i in range(0, len(result), 2): # k, v parsing
@@ -44,7 +62,7 @@ class ArcusMonitor(raft.RaftNode):
 
 			voted = 0.0
 			for nid, repeated_fail in opinions.items():
-				if repeated_fail >= self.failover_thread_hold:
+				if repeated_fail >= self.failover_threshold:
 					voted += 1.0
 
 			if voted / len(opinions) > 0.666:
@@ -99,15 +117,15 @@ class ArcusMonitor(raft.RaftNode):
 				self.reload_check_list()
 				self.hc_flag = 'start'
 
-			for addr in copy.deepcopy(self.check_list):
+			for addr in self.check_list_map.keys():
 				jobs.append(self.check_arcus(addr))
 				if len(jobs) > 10:
 					await asyncio.wait(jobs) # python asyncio has overhead for huge list (as I tested)
 					jobs = []
 
-				if len(jobs) > 0:
-					await asyncio.wait(jobs)
-					jobs = []
+			if len(jobs) > 0:
+				await asyncio.wait(jobs)
+				jobs = []
 
 			if self.state == 'l':
 				if self.get_pending_time() >= 5: # if pending time is more than 5. this can be a splitted master
@@ -133,13 +151,20 @@ class ArcusMonitor(raft.RaftNode):
 		self.reload_check_list()
 
 	def reload_check_list(self):
-		children = self.zk.get_children('/arcus/cache_list/%s' % self.service_code, watch=self.watch_children)
-		self.log_info('reload cache_list: %s' % str(children))
-		tmp_check_list = []
-		for child in children:
-			tmp_check_list.append(child)
+		cloud_list = []
+		service_codes = self.zk.get_children('/arcus/cache_list/')
+		for service_code in service_codes:
+			if self.re_service_code.match(service_code):
+				cloud_list.append(service_code)
 
-		self.check_list = tmp_check_list
+		tmp_check_list_map = {}
+		for cloud in cloud_list:
+			children = self.zk.get_children('/arcus/cache_list/%s' % cloud, watch=self.watch_children)
+			self.log_info('reload %s cache_list: %s' % (cloud, str(children)))
+			for child in children:
+				tmp_check_list_map[child] = cloud
+
+			self.check_list_map = tmp_check_list_map
 
 	def on_start(self):
 		self.zk = KazooClient(hosts=self.zk_addr)
@@ -173,12 +198,18 @@ class ArcusMonitor(raft.RaftNode):
 if __name__ == '__main__':
 	parser = argparse.ArgumentParser()
 	parser.add_argument('-zk', dest='zk_addr', required=True, help='zookeeper address')
-	parser.add_argument('-cloud', dest='cloud', required=True, help='cloud (service code) name')
+	parser.add_argument('-cloud', dest='cloud', required=True, help='regex clouds (service code) name')
+	parser.add_argument('-threshold', dest='failover_threshold', default=5, help='failover threshold (default 5)')
+	parser.add_argument('-limit', dest='failover_count_limit', default=0, help='failover count limit (default 0 unlimited)')
+	parser.add_argument('-cooldown', dest='cooldown_time', default=0, help='failover limit cool down time (default 0)')
 
 	args = raft.parse_default_args(parser)
 
 	node = ArcusMonitor(args.nid, args.addr, args.ensemble_map, args.zk_addr, args.cloud)
+	node.failover_count_limit = args.failover_count_limit
+	node.failover_threshold = args.failover_threshold
+	node.cooldown_time = args.cooldown_time
+
 	node.worker.handler['control'] = [node.do_control, 'we', 1, -1]
 	node.start()
 	node.join()
-
