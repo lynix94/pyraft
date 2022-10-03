@@ -27,7 +27,8 @@ ERROR_INVALID_PARAM = Exception('invalid parameter')
 
 
 class Future(object):
-    def __init__(self, cmd):
+    def __init__(self, cmd, worker_offset=0):
+        self.worker_offset = worker_offset
         self.cmd = cmd
         self.value = None
         self.cond = threading.Condition()

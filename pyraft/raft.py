@@ -45,9 +45,12 @@ class RaftNode(object):
 
 		self.log = RaftLog(nid)
 
-		self.worker = worker
 		if worker is None:
-			self.worker = MergedWorker(self.addr, BaseWorker(self.addr), RedisWorker(self.addr))
+			worker = MergedWorker(self.addr, BaseWorker(self.addr), RedisWorker(self.addr))
+
+		self.worker = worker
+		self.worker_map = {}
+		self.worker_map[worker.worker_offset] = worker
 
 		self.data = {}
 		self.data_lock = threading.Lock()
@@ -63,18 +66,22 @@ class RaftNode(object):
 
 			self.add_node(pid, paddr)
 
-	def get_handler(self, name):
-		return self.worker.get_handler(name)
+	def regist_worker(self, worker_offset, worker):
+		worker.worker_offset = worker_offset
+		self.worker_map[worker_offset] = worker
 
-	def get_handler_func(self, name): # return function only
-		handler = self.get_handler(name)
+	def get_handler(self, name, worker_offset = 0):
+		return self.worker_map[worker_offset].get_handler(name)
+
+	def get_handler_func(self, name, worker_offset = 0): # return function only
+		handler = self.get_handler(name, worker_offset)
 		if isinstance(handler, list):
 			return handler[0]
 
 		return handler
 
-	def propose(self, cmd):
-		handler = self.get_handler(cmd[0].lower())
+	def propose(self, cmd, worker_offset=0):
+		handler = self.get_handler(cmd[0].lower(), worker_offset)
 		if handler is None:
 			raise Exception('unknown commands: %s' % cmd)
 
@@ -86,11 +93,11 @@ class RaftNode(object):
 			if self.state != 'l':
 				for nid, p in self.get_peers().items():
 					if p.state == 'l':
-						return self.worker.relay_cmd(p, cmd)
+						return self.worker_map[worker_offset].relay_cmd(p, cmd, worker_offset)
 
 				raise Exception('cannot relay to leader')
 
-			f = Future(cmd)
+			f = Future(cmd, worker_offset)
 			self.q_entry.put(f)
 
 			ret = f.get(10)
@@ -120,6 +127,7 @@ class RaftNode(object):
 				continue
 
 			cmd = item.cmd
+			worker_offset = item.worker_offset
 			if isinstance(cmd, Future):
 				cmd = cmd.cmd
 
@@ -128,8 +136,7 @@ class RaftNode(object):
 				continue
 
 			self.log_debug('apply command [%d]: "%s"' % (item.index, str(cmd)))
-
-			handler = self.get_handler(cmd[0].lower())
+			handler = self.get_handler(cmd[0].lower(), worker_offset)
 			if handler is None:
 				self.log_error('unknown command: %s' % cmd)
 				sys.exit(-1)
@@ -177,11 +184,12 @@ class RaftNode(object):
 				if l == None:
 					break
 
-				# term, index, ts, cmd
+				# term, index, ts, worker_offset, cmd
 				index = l[1]
-				cmd = l[3]
+				worker_offset = l[3]
+				cmd = l[4]
 
-				handler = self.get_handler(cmd[0].lower())
+				handler = self.get_handler(cmd[0].lower(), worker_offset)
 				if handler is None:
 					self.log_error('unknown command: %s' % cmd)
 					sys.exit(-1)
@@ -213,11 +221,17 @@ class RaftNode(object):
 		self.th_apply = threading.Thread(target=self.apply_loop)
 		self.th_apply.start()
 
-		self.worker.start(self)
+		for offset in sorted(self.worker_map.keys()):
+			worker = self.worker_map[offset]
+			worker.start(self)
+
 		self.on_start()
 
 	def shutdown(self):
-		self.worker.shutdown()
+		for offset in sorted(self.worker_map.keys()):
+			worker = self.worker_map[offset]
+			worker.shutdown()
+
 		self.shutdown_flag = True
 		self.on_shutdown()
 
@@ -226,7 +240,9 @@ class RaftNode(object):
 		self.th_le.join()
 		self.th_apply.join()
 
-		self.worker.join()
+		for offset in sorted(self.worker_map.keys()):
+			worker = self.worker_map[offset]
+			worker.join()
 
 		for nid, peer in self.get_peers().items():
 			peer.raft_req.close()
@@ -449,12 +465,12 @@ class RaftNode(object):
 			self.commit_index = commit_index
 			self.log.apply_commit_index(commit_index)
 
-		if toks[0] == 'append_entry': # append_entry, term, prev_term, prev_index, commit_index, ts, cmds...
+		if toks[0] == 'append_entry': # append_entry, term, prev_term, prev_index, commit_index, ts, worker_offset, cmds...
 			ts = toks[5]
 			if len(toks) > 6:
 				self.log_debug('apply append_entry to %d-%d' % (term, prev_index))
 				index = prev_index + 1
-				item = LogItem(self.term, index, ts, toks[6:])
+				item = LogItem(self.term, index, ts, int(toks[6]), toks[7:])
 				self.log.push(item, self.commit_index)
 			else:
 				index = self.index
@@ -649,6 +665,7 @@ class RaftNode(object):
 
 		if future != None:
 			append_cmd = ['append_entry', self.term, prev_term, prev_index, self.commit_index, ts]
+			append_cmd.append(future.worker_offset)
 			append_cmd += future.cmd
 			for nid, p in self.get_peers().items():
 				self.log_debug('leader write to %s: "%s"' % (p.nid, str(append_cmd)))
@@ -665,7 +682,7 @@ class RaftNode(object):
 
 			if n_ack > half:
 				self.commit_index = prev_index+1
-				item = LogItem(self.term, prev_index+1, ts, future)
+				item = LogItem(self.term, prev_index+1, ts, future.worker_offset, future)
 				self.log.push(item, self.commit_index)
 				# send dummy append below to noti commit
 			else:

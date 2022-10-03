@@ -4,14 +4,15 @@ from pyraft.common import *
 from pyraft.protocol import resp
 
 class LogItem(object):
-    def __init__(self, term, index, ts, cmd):
+    def __init__(self, term, index, ts, worker_offset, cmd):
         self.term = term
         self.index = index
         self.ts = ts
         self.cmd = cmd
+        self.worker_offset = worker_offset
 
     def to_list(self):
-        return [self.term, self.index, self.ts, self.cmd]
+        return [self.term, self.index, self.ts, self.worker_offset, self.cmd]
 
     def __repr__(self):
         return repr(self.to_list())
@@ -53,7 +54,7 @@ class LogFile(object):
             if l == None:
                 break
 
-            decoded.append(LogItem(l[0], l[1], l[2], l[3]))
+            decoded.append(LogItem(l[0], l[1], l[2], l[3], l[4]))
 
             if remain == '':
                 break
@@ -173,7 +174,7 @@ class RaftLog(object):
         self.q.put(item)
 
         if isinstance(item.cmd, Future):
-            new_item = LogItem(item.term, item.index, item.ts, item.cmd.cmd)
+            new_item = LogItem(item.term, item.index, item.ts, item.worker_offset, item.cmd.cmd)
             self.log.append(new_item)
         else:
             self.log.append(item)

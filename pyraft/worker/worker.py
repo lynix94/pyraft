@@ -14,6 +14,7 @@ class Worker(object):
         self.addr = addr
         self.ip, self.port = addr.split(':')
         self.port = int(self.port)
+        self.worker_offset = 0 # offset between node baseport
 
     def set_protocol(self, p):
         self.p = p
@@ -91,7 +92,7 @@ class Worker(object):
                     continue
 
                 try:
-                    ret = node.propose(words)
+                    ret = node.propose(words, self.worker_offset)
                 except Exception as e:
                     ret = e
 
@@ -101,13 +102,14 @@ class Worker(object):
 
                 pio.write(ret)
 
-    def relay_cmd(self, leader, cmd):
+    def relay_cmd(self, leader, cmd, worker_offset):
         p = leader
         try:
             if not hasattr(p, 'req_io'):
-                ip, dummy = p.addr.split(':')
+                ip, port = p.addr.split(':')
+                port = int(port) + worker_offset
                 sock = socket.socket()
-                sock.connect((ip, self.port))
+                sock.connect((ip, port))
                 p.req_io = self.p.open_io(sock)
 
             p.req_io.write(cmd)
@@ -134,29 +136,5 @@ class MergedWorker(Worker):
 
         return None
 
-class CompositeWorker(Worker):
-    def __init__(self, *workers):
-        self.worker_list = workers
-
-    def start(self, node):
-        for worker in self.worker_list:
-            worker.start(node)
-
-    def shutdown(self):
-        for worker in self.worker_list:
-            worker.shutdown_flag = True
-
-    def join(self):
-        for worker in self.worker_list:
-            worker.join()
-
-    def get_handler(self, name):
-        if name in self.handler:
-            return self.handler[name]
-
-        for worker in self.worker_list:
-            handler = worker.get_handler(name)
-            if handler is not None:
-                return handler
-
-        return None
+    def append_worker(self, worker):
+        self.worker_list.append(worker)
