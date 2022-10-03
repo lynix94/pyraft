@@ -8,8 +8,9 @@ from pyraft.common import *
 from pyraft.protocol import resp
 from pyraft.log import RaftLog
 from pyraft.log import LogItem
-from pyraft.worker.worker import CompositeWorker
+from pyraft.worker.worker import MergedWorker
 from pyraft.worker.redis_worker import RedisWorker
+from pyraft.worker.base_worker import BaseWorker
 
 class RaftNode(object):
 	def __init__(self, nid, addr, ensemble={}, peer = False, worker = None):
@@ -46,7 +47,7 @@ class RaftNode(object):
 
 		self.worker = worker
 		if worker is None:
-			self.worker = RedisWorker(self.addr)
+			self.worker = MergedWorker(self.addr, BaseWorker(self.addr), RedisWorker(self.addr))
 
 		self.data = {}
 		self.data_lock = threading.Lock()
@@ -944,16 +945,13 @@ def parse_default_args(parser):
 	args.ensemble_map = ensemble
 	return args
 
-def make_redis_node():
+def make_default_node(): # redis interface node is default now
 	args = parse_default_args(argparse.ArgumentParser())
 	node = RaftNode(args.nid, args.addr, args.ensemble_map)
-	
+
 	if args.load != None:
 		node.load(args.load)
 
 	return node
-
-def make_default_node(): # redis interface node is default now
-	return make_redis_node()
 
 

@@ -1,11 +1,11 @@
 import time
 
 from pyraft.common import *
-from pyraft.worker.base_worker import BaseWorker
+from pyraft.worker.worker import Worker
 
 
 # worker for data handling with redis interface
-class RedisWorker(BaseWorker):
+class RedisWorker(Worker):
     def __init__(self, addr):
         super(RedisWorker, self).__init__(addr)
         self.init_redis_handler()

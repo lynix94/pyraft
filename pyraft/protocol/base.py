@@ -64,6 +64,9 @@ class base_io:
                 except socket.error:
                     self.close()
                     return None
+                except Exception:
+                    self.close()
+                    return None
 
                 if tmp == '':
                     self.close()

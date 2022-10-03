@@ -75,11 +75,11 @@ class Worker(object):
                 continue
 
             if len(words) > 0:
-                if words[0].lower() not in self.handler:
+                handler = self.get_handler(words[0].lower())
+                if handler == None:
                     pio.write(Exception('Unknown command: %s' % words[0]))
                     continue
 
-                handler = self.handler[words[0].lower()]
                 p_min = handler[2]
                 p_max = handler[3]
                 if len(words) - 1 < p_min:
@@ -118,6 +118,22 @@ class Worker(object):
             delattr(p, 'req_io')
             raise Exception('relay to leader has exception: %s', str(e))
 
+class MergedWorker(Worker):
+    def __init__(self, addr, *workers):
+        super(MergedWorker, self).__init__(addr)
+        self.worker_list = workers
+
+    def get_handler(self, name):
+        if name in self.handler:
+            return self.handler[name]
+
+        for worker in self.worker_list:
+            handler = worker.get_handler(name)
+            if handler is not None:
+                return handler
+
+        return None
+
 class CompositeWorker(Worker):
     def __init__(self, *workers):
         self.worker_list = workers
@@ -135,10 +151,12 @@ class CompositeWorker(Worker):
             worker.join()
 
     def get_handler(self, name):
+        if name in self.handler:
+            return self.handler[name]
+
         for worker in self.worker_list:
             handler = worker.get_handler(name)
             if handler is not None:
                 return handler
 
         return None
-
