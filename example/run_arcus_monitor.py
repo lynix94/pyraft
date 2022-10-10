@@ -2,6 +2,7 @@ import os, sys, time, copy, re
 import threading, argparse
 import asyncio
 
+from pyraft.common import RaftException
 from pyraft import raft
 from kazoo.client import KazooClient
 
@@ -185,14 +186,14 @@ class ArcusMonitor(raft.RaftNode):
 
 		if words[1] == 'hc':
 			if len(words) <= 2:
-				raise Exception("insufficient parameter")
+				raise RaftException("insufficient parameter")
 
 			if words[2] in ['start', 'stop', 'reload']:
 				node.hc_flag = words[2]
 			else:
-				raise Exception('invalid sub command')
+				raise RaftException('invalid sub command')
 		else:
-			raise Exception('invalid sub command')
+			raise RaftException('invalid sub command')
 
 
 if __name__ == '__main__':

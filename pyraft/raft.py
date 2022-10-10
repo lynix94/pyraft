@@ -1,4 +1,4 @@
-import time, threading, socket, select
+import time, traceback
 import random, queue
 import argparse
 import logging
@@ -51,6 +51,7 @@ class RaftNode(object):
 		self.worker = worker
 		self.worker_map = {}
 		self.worker_map[worker.worker_offset] = worker
+		worker.init_node(self)
 
 		self.data = {}
 		self.data_lock = threading.Lock()
@@ -69,6 +70,7 @@ class RaftNode(object):
 	def regist_worker(self, worker_offset, worker):
 		worker.worker_offset = worker_offset
 		self.worker_map[worker_offset] = worker
+		worker.init_node(self)
 
 	def get_handler(self, name, worker_offset = 0):
 		return self.worker_map[worker_offset].get_handler(name)
@@ -83,19 +85,19 @@ class RaftNode(object):
 	def propose(self, cmd, worker_offset=0):
 		handler = self.get_handler(cmd[0].lower(), worker_offset)
 		if handler is None:
-			raise Exception('unknown commands: %s' % cmd)
+			raise RaftException('unknown commands: %s' % cmd)
 
 		if 'e' in handler[1]:
 			if self.state == 'c':
 				self.log_warn('request while candidate')
-				raise Exception('temporary unavailable')
+				raise RaftException('temporary unavailable')
 
 			if self.state != 'l':
 				for nid, p in self.get_peers().items():
 					if p.state == 'l':
 						return self.worker_map[worker_offset].relay_cmd(p, cmd, worker_offset)
 
-				raise Exception('cannot relay to leader')
+				raise RaftException('cannot relay to leader')
 
 			f = Future(cmd, worker_offset)
 			self.q_entry.put(f)
@@ -144,7 +146,10 @@ class RaftNode(object):
 			with self.data_lock:
 				try:
 					ret = handler[0](self, cmd)
+				except RaftException as e:
+					ret = e
 				except Exception as e:
+					print('unexpected exception: ', traceback.format_exc())
 					ret = e
 
 				self.index = item.index
@@ -880,7 +885,10 @@ class RaftNode(object):
 	def request(self, *cmd):
 		try:
 			ret = self.propose(cmd)
+		except RaftException as e:
+			ret = e
 		except Exception as e:
+			print('unexpected exception: ', traceback.format_exc())
 			ret = e
 
 		return ret
@@ -909,7 +917,7 @@ def parse_default_args(parser):
 		elif args.loglevel.lower() == 'fatal':
 			logger.setLevel(logging.FATAL)
 		else:
-			raise Exception('unknown log level')
+			raise RaftException('unknown log level')
 
 	if args.logfile is not None:
 		handler = RotatingFileHandler(args.logfile, maxBytes=1024*1024, backupCount=10)
@@ -920,7 +928,7 @@ def parse_default_args(parser):
 	## process ensemble
 	if args.addr == None:
 		parser.print_help()
-		raise Exception('addr is required')
+		raise RaftException('addr is required')
 
 	if args.nid == None:
 		args.nid = args.addr

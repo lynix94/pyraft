@@ -1,7 +1,5 @@
-import sys, threading
-
-import select
-import socket
+import threading
+import socket, time
 
 CONF_LOG_MAX = 100000
 CONF_LOG_FILE_MAX = 10000
@@ -25,6 +23,9 @@ ERROR_TYPE = Exception('invalid data type')
 ERROR_NOT_EXISTS = Exception('not exists')
 ERROR_INVALID_PARAM = Exception('invalid parameter')
 
+class RaftException(Exception):
+    def __init__(self, msg):
+        super(RaftException, self).__init__(msg)
 
 class Future(object):
     def __init__(self, cmd, worker_offset=0):

@@ -16,6 +16,9 @@ class Worker(object):
         self.port = int(self.port)
         self.worker_offset = 0 # offset between node baseport
 
+    def init_node(self, node):
+        pass # inherit for worker specific node init
+
     def set_protocol(self, p):
         self.p = p
 
@@ -96,9 +99,17 @@ class Worker(object):
                 except Exception as e:
                     ret = e
 
-                if isinstance(ret, dict) and 'quit' in ret:
-                    pio.close()
-                    return
+                # for special actions (like quit)
+                if isinstance(ret, dict):
+                    if 'quit' in ret:
+                        pio.close()
+                        return
+
+                    # some protocols have to send something before closing
+                    if 'quit_after_send' in ret:
+                        pio.write(ret['quit_after_send'])
+                        pio.close()
+                        return
 
                 pio.write(ret)
 
@@ -118,7 +129,7 @@ class Worker(object):
         except Exception as e:
             p.req_io.close()
             delattr(p, 'req_io')
-            raise Exception('relay to leader has exception: %s', str(e))
+            raise RaftException('relay to leader has exception: %s', str(e))
 
 class MergedWorker(Worker):
     def __init__(self, addr, *workers):
