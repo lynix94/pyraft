@@ -3,8 +3,11 @@ import socket, select
 class base_io:
     def __init__(self, sock):
         self.sock = sock
-        self.buff = ''
+        self.buff = b''
         self.timeout = -1
+
+        self.last_decodable = False
+        self.last_buff_len = 0
 
     def connected(self):
         return self.sock != None
@@ -22,7 +25,9 @@ class base_io:
         msg = self.raw_encode(msg)
 
         try:
-            ret = self.sock.send(msg.encode())
+            if isinstance(msg, str):
+                msg = msg.encode()
+            ret = self.sock.send(msg)
         except socket.error:
             self.close()
             return None
@@ -38,7 +43,11 @@ class base_io:
             return None
 
         try:
-            ret = self.sock.send(self.encode(msg).encode())
+            msg = self.encode(msg)
+            if isinstance(msg, str):
+                msg = msg.encode()
+
+            ret = self.sock.send(msg)
             if ret == 0:
                 self.close()
                 return None
@@ -53,14 +62,26 @@ class base_io:
             return None
 
         while True:
-            if not self.decodable(self.buff):
-                if timeout != None:
+            readable = False
+            if timeout != None: # avoid useless decodable check
+                if self.last_decodable == False and self.last_buff_len == len(self.buff):
                     reads, writes, excepts = select.select([self.sock], [], [], timeout)
                     if len(reads) == 0:
-                        return ''
+                        return b''
+                    else:
+                        readable = True
+
+            self.last_decodable = True
+            if not self.decodable(self.buff):
+                if timeout != None and not readable: # skip double wait
+                    reads, writes, excepts = select.select([self.sock], [], [], timeout)
+                    if len(reads) == 0:
+                        self.last_decodable = False
+                        self.last_buff_len = len(self.buff)
+                        return b''
 
                 try:
-                    tmp = self.sock.recv(4096).decode('utf-8')
+                    tmp = self.sock.recv(4096)
                 except socket.error:
                     self.close()
                     return None
@@ -68,7 +89,7 @@ class base_io:
                     self.close()
                     return None
 
-                if tmp == '':
+                if tmp == b'':
                     self.close()
                     return None
 
@@ -79,15 +100,17 @@ class base_io:
                 if timeout != None:
                     reads, writes, excepts = select.select([self.sock], [], [], timeout)
                     if len(reads) == 0:
-                        return ''
+                        self.last_decodable = False
+                        self.last_buff_len = len(self.buff)
+                        return b''
 
                 try:
-                    tmp = self.sock.recv(4096).decode('utf-8')
+                    tmp = self.sock.recv(4096)
                 except socket.error:
                     self.close()
                     return None
 
-                if tmp == '':
+                if tmp == b'':
                     self.close()
                     return None
 
@@ -104,7 +127,7 @@ class base_io:
             if ret == None:
                 return None
 
-            if ret == '':
+            if ret == b'':
                 break
 
             result.append(ret)

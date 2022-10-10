@@ -69,10 +69,10 @@ class Worker(object):
                 pio.close()
                 return
 
-            if isinstance(words, str):
+            if isinstance(words, str): # resp inline command
                 words = words.split()
 
-            if words == ['']:
+            if words == b'' or words == ['']:
                 continue
 
             if len(words) > 0:

@@ -34,12 +34,12 @@ def resp_encoding(msg):
 	return '-unknown resp type\r\n'
 
 def resp_decoding(src):
-	#print 'decoding >>>> "%s"' % src
+	#print('decoding >>>> "%s"' % src)
 	if len(src) == 0:
 		return None, src
 
-	if src[0] == '*':
-		toks = src.split('\r\n', 1)
+	if src.startswith(b'*'):
+		toks = src.split(b'\r\n', 1)
 		count = int(toks[0][1:])
 		remain = toks[1]
 
@@ -53,8 +53,8 @@ def resp_decoding(src):
 
 		return result, remain
 
-	if src[0] == '$':
-		toks = src.split('\r\n', 1)
+	if src.startswith(b'$'):
+		toks = src.split(b'\r\n', 1)
 		if len(toks) != 2:
 			return None, src
 
@@ -63,35 +63,35 @@ def resp_decoding(src):
 		if len(remain) < size+2:
 			return None, src
 
-		return remain[:size], remain[size+2:]
+		return remain[:size].decode('utf-8'), remain[size+2:]
 		
-	if src[0] == '+':
-		toks = src.split('\r\n', 1)
+	if src.startswith(b'+'):
+		toks = src.split(b'\r\n', 1)
 		if len(toks) != 2:
 			return None, src
 
-		return toks[0][1:], toks[1]
+		return toks[0][1:].decode('utf-8'), toks[1]
 
-	if src[0] == '-':
-		toks = src.split('\r\n', 1)
+	if src.startswith(b'-'):
+		toks = src.split(b'\r\n', 1)
 		if len(toks) != 2:
 			return None, src
 
-		return Exception(toks[0][1:]), toks[1]
+		return Exception(toks[0][1:].decode('utf-8')), toks[1]
 
-	if src[0] == ':':
-		toks = src.split('\r\n', 1)
+	if src.startswith(b':'):
+		toks = src.split(b'\r\n', 1)
 		if len(toks) != 2:
 			return None, src
 
 		return int(toks[0][1:]), toks[1]
 
 	# plain text input
-	toks = src.split('\r\n', 1)
+	toks = src.split(b'\r\n', 1)
 	if len(toks) == 1:
-		return src, ''
+		return src.decode('utf-8'), b''
 
-	return toks[0], toks[1]
+	return toks[0].decode('utf-8'), toks[1]
 
 
 class resp_io(base_io):
@@ -111,7 +111,7 @@ class resp_io(base_io):
 		return resp_decoding(msg)
 
 	def decodable(self, buff):
-		if '\r\n' in buff:
+		if b'\r\n' in buff:
 			return True
 
 		return False
