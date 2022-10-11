@@ -1,7 +1,10 @@
-import struct
+import struct, socket, base64
 
+from pyraft.common import *
 from pyraft.protocol.base import base_io
 from pyraft.protocol.zk_exceptions import *
+
+
 
 # came from kazoo serialization.py
 # Struct objects with formats compiled
@@ -33,7 +36,7 @@ def read_acl(bytes, offset):
     offset += int_struct.size
     scheme, offset = read_string(bytes, offset)
     id, offset = read_string(bytes, offset)
-    return ACL(perms, Id(scheme, id)), offset
+    return (perms, scheme, id), offset
 
 def write_string(bytes):
     if not bytes:
@@ -74,10 +77,15 @@ class ZkConnect:
         self.connected = False
 
     def deserialize(self, buff, offset):
+        self.proto_ver = int_struct.unpack_from(buff, offset)
         self.proto_ver, last_zxid, self.timeout, self.session_id = int_long_int_long_struct.unpack_from(buff, offset)
         offset += int_long_int_long_struct.size
-        password, offset = read_buffer(buff, offset)
-        self.read_only = buff[offset]
+
+        self.read_only = 0
+        if self.proto_ver != -1: # relay connection skip password, read_only
+            password, offset = read_buffer(buff, offset)
+            self.read_only = buff[offset]
+
         self.connected = True
         return ['connect', self]
 
@@ -89,20 +97,27 @@ class ZkConnect:
 
 class ZkCreate:
     type = 1
+    write = True # save original buffer & request socket to handle relay
+    json = True # convert __dict__ to json for logging
 
     def deserialize(self, buff, offset):
         self.path, offset = read_string(buff, offset)
-        self.data, offset = read_buffer(buff, offset)
+        data, offset = read_buffer(buff, offset)
+        if data is None:
+            self.data = ''
+        else:
+            self.data = data.decode('utf-8')
+
         acl_len = int_struct.unpack_from(buff, offset)[0]
         offset += int_struct.size
 
         self.acl = []
         for i in range(acl_len):
-            perms = int_struct.unpack_from(buff, offset)
+            perms = int_struct.unpack_from(buff, offset)[0]
             offset += int_struct.size
             id_scheme, offset = read_string(buff, offset)
             id_id, offset = read_string(buff, offset)
-            self.acl.append((perms, id_scheme, id_id))
+            self.acl.append([perms, id_scheme, id_id])
 
         self.flags = int_struct.unpack_from(buff, offset)[0]
         offset += int_struct.size
@@ -115,6 +130,8 @@ class ZkCreate:
 
 class ZkDelete:
     type = 2
+    write = True
+    json = True
 
     def deserialize(self, buff, offset):
         self.path, offset = read_string(buff, offset)
@@ -134,7 +151,7 @@ class ZkExists:
         return ['exists', self]
 
     def serialize(self, b):
-        b.extend(self.node.stat_pack())
+        b.extend(self._node.stat_pack())
         return b
 
 class ZkGetData:
@@ -146,22 +163,29 @@ class ZkGetData:
         return ['getdata', self]
 
     def serialize(self, b):
-        b.extend(write_buffer(self.node.get_data()))
-        b.extend(self.node.stat_pack())
+        b.extend(write_string(self._node.get_data()))
+        b.extend(self._node.stat_pack())
         return b
 
 class ZkSetData:
     type = 5
+    write = True
+    json = True
 
     def deserialize(self, buff, offset):
         self.path, offset = read_string(buff, offset)
-        self.data, offset = read_buffer(buff, offset)
+        data, offset = read_buffer(buff, offset)
+        if data is None:
+            self.data = ''
+        else:
+            self.data = data.decode('utf-8')
+
         self.version = int_struct.unpack_from(buff, offset)[0]
         offset += int_struct.size
         return ['setdata', self]
 
     def serialize(self, b):
-        b.extend(self.node.stat_pack())
+        b.extend(self._node.stat_pack())
         return b
 
 class ZkGetACL:
@@ -187,6 +211,8 @@ class ZkGetACL:
 
 class ZkSetACL:
     type = 7
+    write = True
+    json = True
 
     def deserialize(self, buff, offset):
         self.path, offset = read_string(buff, offset)
@@ -204,7 +230,7 @@ class ZkSetACL:
         return ['setacl', self]
 
     def serialize(self, b):
-        b.extend(self.node.stat_pack())
+        b.extend(self._node.stat_pack())
         return b
 
 class ZkGetChildren:
@@ -216,21 +242,28 @@ class ZkGetChildren:
         return ['getchildren', self]
 
     def serialize(self, b):
-        count = len(self.children)
+        count = len(self._children)
 
         b.extend(int_struct.pack(count))
-        if count <= 0:
-            return b
-
-        for child in self.children:
+        for child in self._children:
             b.extend(write_string(child.name))
-            if self.type == 12: # getchildren2
-                b.extend(child.stat_pack())
+
+        if self.type == 12: # getchildren2
+            b.extend(self._node.stat_pack())
 
         return b
 
 class ZkGetChildren2(ZkGetChildren):
     type = 12
+
+class ZkPing:
+    type = 11
+
+    def deserialize(self, buff, offset):
+        return ['ping', self]
+
+    def serialize(self, b):
+        return b
 
 class zk_io(base_io):
     request_map = {
@@ -243,6 +276,7 @@ class zk_io(base_io):
         6:ZkGetACL,
         7:ZkSetACL,
         8:ZkGetChildren,
+        11:ZkPing,
         12:ZkGetChildren2,
     }
 
@@ -252,6 +286,7 @@ class zk_io(base_io):
         super(zk_io, self).__init__(sock)
         self.conn = ZkConnect()
         self.xid = 0
+        self.relay_map = {}
 
     def inc_zxid(self):
         self.zxid += 1
@@ -261,7 +296,7 @@ class zk_io(base_io):
         return buff
 
     def encode(self, cmd):
-        print('>> encoding: %s' % str(cmd))
+        #print('>> encoding: %s' % str(cmd))
         if isinstance(cmd, bytes) or isinstance(cmd, bytearray):
             return cmd
 
@@ -269,14 +304,18 @@ class zk_io(base_io):
             return cmd.encode()
 
         b = bytearray()
-
         # make header (if not connect)
         if not isinstance(cmd, ZkConnect):
             error_code = 0
             if isinstance(cmd, ZookeeperError):
                 error_code = cmd.code
 
-            b.extend(reply_header_struct.pack(self.xid, self.inc_zxid(), error_code))
+            if isinstance(cmd, ZkPing):
+                zxid = self.zxid
+            else:
+                zxid = self.inc_zxid()
+
+            b.extend(reply_header_struct.pack(self.xid, zxid, error_code))
 
         # make body if not error
         if not isinstance(cmd, ZookeeperError):
@@ -297,19 +336,50 @@ class zk_io(base_io):
         self.xid, request_type = int_int_struct.unpack_from(buff, offset)
         offset += int_int_struct.size
 
+        #print("decode buff: ",  self.sock.fileno(), bytes_to_str(buff))
         if request_type not in self.request_map:
             raise UnimplementedError()
 
-        return self.request_map[request_type]().deserialize(buff, offset), remain
+        cmd = self.request_map[request_type]()
+        cmd.xid = self.xid
+        cmd.session_id = self.conn.session_id
+
+        if hasattr(cmd, 'write'):
+            cmd._original_buff = buff[:int_struct.size + length]
+            cmd._req_io = self
+
+        return cmd.deserialize(buff, offset), remain
 
     def decodable(self, buff):
         if len(buff) < 4:
             return False
 
-        buff = bytes(buff, 'utf-8')
         length = int_struct.unpack_from(buff, 0)[0]
         if len(buff) > (length + 4):
             return True
 
         return False
 
+    # TODO: enhance
+    def relay_cmd(self, addr, cmd): # cmd: ['create', ZkCreate]
+        name = cmd[0]
+        cmd = cmd[1]
+
+        if addr not in self.relay_map:
+            ip, port = addr.split(':')
+            s = socket.socket()
+            s.connect((ip, int(port)))
+            self.relay_map[addr] = s
+
+            # make relay connection
+            b = bytearray()
+            b.extend(int_struct.pack(int_long_int_long_struct.size))
+            b.extend(int_long_int_long_struct.pack(-1, 0, 10000, cmd.session_id)) # proto, last zxid, timeout, session_id
+            s.send(b)
+            ret = s.recv(4096)
+
+        s = self.relay_map[addr]
+        s.send(cmd._original_buff)
+        ret = s.recv(4096)
+
+        return ret

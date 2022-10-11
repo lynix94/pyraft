@@ -1,3 +1,4 @@
+import json
 
 from pyraft.common import *
 from pyraft.protocol.base import base_io
@@ -30,6 +31,16 @@ def resp_encoding(msg):
 			
 	if isinstance(msg, Exception):
 		return '-%s\r\n' % str(msg)
+
+	# json encodable class (ex. zk Commands classes)
+	if hasattr(msg, 'json'):
+		result = {}
+		for key, value in msg.__dict__.items():
+			if key.startswith('_'):
+				continue
+			result[key] = value
+
+		return resp_encoding(json.dumps(result))
 
 	return '-unknown resp type\r\n'
 

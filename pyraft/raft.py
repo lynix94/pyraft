@@ -1,7 +1,6 @@
-import time, traceback
+import traceback, select
 import random, queue
 import argparse
-import logging
 from logging.handlers import RotatingFileHandler
 
 from pyraft.common import *

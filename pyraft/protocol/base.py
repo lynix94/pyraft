@@ -1,5 +1,7 @@
 import socket, select
 
+from pyraft.common import *
+
 class base_io:
     def __init__(self, sock):
         self.sock = sock

@@ -1,11 +1,13 @@
+import traceback
+
 from pyraft.common import *
 from pyraft.protocol import resp
 
-class RespProtocol(object):
+class RespProtocol:
     def open_io(self, handle):
         return resp.resp_io(handle)
 
-class Worker(object):
+class Worker:
     def __init__(self, addr):
         self.handler = {}
         self.shutdown_flag = False
@@ -96,11 +98,18 @@ class Worker(object):
 
                 try:
                     ret = node.propose(words, self.worker_offset)
+                except RaftException as e:
+                    ret = e
                 except Exception as e:
+                    print('unexpected exception: ', traceback.format_exc())
                     ret = e
 
                 # for special actions (like quit)
                 if isinstance(ret, dict):
+                    if 'bypass' in ret:
+                        pio.raw_write(ret['bypass'])
+                        continue
+
                     if 'quit' in ret:
                         pio.close()
                         return

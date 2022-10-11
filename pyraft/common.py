@@ -1,5 +1,5 @@
-import threading
-import socket, time
+import os, sys, time
+import socket, threading, logging
 
 CONF_LOG_MAX = 100000
 CONF_LOG_FILE_MAX = 10000
@@ -50,3 +50,12 @@ class Future(object):
         with self.cond:
             self.value = value
             self.cond.notify()
+
+def bytes_to_str(b):
+    out = []
+    for c in b:
+        out.append('%02x' % c)
+
+    return ' '.join(out)
+
+logger = logging.getLogger('pyraft')
