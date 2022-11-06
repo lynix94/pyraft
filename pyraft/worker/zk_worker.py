@@ -14,46 +14,53 @@ class ZkProtocol:
     def open_io(self, handle):
         return zk.zk_io(handle)
 
-class ZkStat:
-    def __init__(self):
-        self.ctime = self.mtime = int(time.time() * 1000)
-        self.czxid = self.mzxid = 0
-        self.version = 0
-        self.cversion = 0
-        self.aversion = 0
-        self.ephermeralOwner = 0
-        self.pzxid = 0
-
 # TODO: r/w locking
-class ZkNode:
-    def __init__(self, name, data, acl, flags):
-        self.name = name
-        self.data = data
-        self.acl = acl
-        self.flags = flags
-        self.stat = ZkStat()
-        self.children = {}
+def init_zk_stat():
+    stat = {}
+    stat['ctime'] = stat['mtime'] = int(time.time() * 1000)
+    stat['czxid'] = stat['mzxid'] = 0
+    stat['version'] = 0
+    stat['cversion'] = 0
+    stat['aversion'] = 0
+    stat['ephermeralOwner'] = 0
+    stat['pzxid'] = 0
+
+    return stat
+
+
+class ZkNode(object):
+    def __init__(self, obj):
+        self.obj = obj
+
+    def __getattr__(self, name):
+        if name in self.obj:
+            return self.obj[name]
+
+        raise Exception('%s not found' % name)
+
+    def __setattr__(self, key, value):
+        super().__setattr__(key, value)
 
     def stat_pack(self):
         s = self.stat
-        return stat_struct.pack(s.czxid, s.mzxid, s.ctime, s.mtime,
-                                s.version, s.cversion, s.aversion,
-                                s.ephermeralOwner, len(self.data), len(self.children),
-                                s.pzxid)
+        return stat_struct.pack(s['czxid'], s['mzxid'], s['ctime'], s['mtime'],
+                                s['version'], s['cversion'], s['aversion'],
+                                s['ephermeralOwner'], len(self.data), len(self.children),
+                                s['pzxid'])
 
     def get_data(self):
         return self.data
 
     def set_data(self, data):
         self.data = data
-        self.stat.version += 1
+        self.stat['version'] += 1
 
     def get_acl(self):
         return self.acl
 
     def set_acl(self, acl):
         self.acl = acl
-        self.stat.aversion += 1
+        self.stat['aversion'] += 1
 
     def get_flags(self):
         return self.flags
@@ -68,29 +75,34 @@ class ZkNode:
         if name not in self.children:
             raise NoNodeError()
 
-        return self.children[name]
+        return ZkNode(self.children[name])
 
     def create_child(self, name, data, acl, flags):
         if name in self.children:
             raise NodeExistsError()
 
-        self.children[name] = ZkNode(name, data, acl, flags)
-        self.stat.cversion += 1
-        return self.children[name]
+        self.children[name] = {'name':name, 'data':data, 'acl':acl, 'flags':flags, 'stat':init_zk_stat(), 'children':{}}
+        self.stat['cversion'] += 1
+        return ZkNode(self.children[name])
 
     def delete_child(self, name):
         if name not in self.children:
             raise NoNodeError()
 
         child = self.children[name]
-        if len(child.children) > 0:
+        if len(child['children']) > 0:
             raise NotEmptyError()
 
         del self.children[name]
         self.stat.cversion += 1
 
     def get_children(self):
-        return self.children.values()
+        ret = []
+        children = self.children.values()
+        for child in children:
+            ret.append(ZkNode(child))
+
+        return ret
 
 # handle string based request (by append_entry)
 def handle_json(handler):
@@ -124,8 +136,8 @@ class ZkWorker(Worker):
         self.session_map = {} # connected sessions
 
     def init_node(self, node):
-        if not hasattr(node, 'zk_root'):
-            node.zk_root = ZkNode('root', 'root', [], 0)
+        if '__ZK_ROOT__' not in node.data:
+            node.data['__ZK_ROOT__'] = {'name':'root', 'data':'', 'acl':[], 'flags':0, 'stat':init_zk_stat(), 'children':{}}
 
     def init_zk_handler(self):
         self.handler['connect'] = [self.do_connect, 'r', 1, 1]
@@ -146,7 +158,6 @@ class ZkWorker(Worker):
         self.handler['reconfig'] = [self.do_reconfig, 'we', 1, 1]
         self.handler['sasl'] = [self.do_sasl, 'r', 1, 1]
         self.handler['auth'] = [self.do_auth, 'r', 1, 1]
-        self.handler['watch'] = [self.do_watch, 'r', 1, 1]
         self.handler['transaction'] = [self.do_transaction, 'r', 1, 1]
         self.handler['checkversion'] = [self.do_checkversion, 'r', 1, 1]
         '''
@@ -169,10 +180,10 @@ class ZkWorker(Worker):
             raise BadArgumentsError()
 
         if path.strip() == '/':
-            return node.zk_root
+            return ZkNode(node.data['__ZK_ROOT__'])
 
         dir_list = path[1:].split('/')
-        cwd = node.zk_root
+        cwd = ZkNode(node.data['__ZK_ROOT__'])
         count = len(dir_list)
         if parent:
             count -= 1

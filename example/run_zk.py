@@ -9,6 +9,8 @@ if __name__ == '__main__':
 	args = raft.parse_default_args(parser)
 
 	node = raft.RaftNode(args.nid, args.addr, args.ensemble_map)
+	if args.load != None:
+		node.load(args.load)
 
 	ip, port = args.addr.split(':')
 	zk = ZkWorker('%s:%d' % (ip, int(port)+2)) # +1 is used for raft protocol
