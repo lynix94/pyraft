@@ -929,6 +929,9 @@ def parse_default_args(parser):
 		parser.print_help()
 		raise RaftException('addr is required')
 
+	if args.addr.startswith(':'):
+		args.addr = '0.0.0.0%s' % args.addr
+
 	if args.nid == None:
 		args.nid = args.addr
 
@@ -960,6 +963,9 @@ def parse_default_args(parser):
 					ensemble[nid] = addr
 				elif len(etoks) == 1:
 					addr = tok
+					if addr.startswith(':'):
+						addr = '0.0.0.0%s' % addr
+
 					ensemble['__TEMP_%s__' % addr] = addr
 				else:
 					print('invalid ensemble format')
