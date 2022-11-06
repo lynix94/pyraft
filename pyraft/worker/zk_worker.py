@@ -153,13 +153,13 @@ class ZkWorker(Worker):
         super().__init__(addr)
         self.init_zk_handler()
         self.set_protocol(ZkProtocol())
-        self.watch_mgr = ZkWatcher()
         self.session_map = {} # connected sessions
 
     def start(self, node):
         super().start(node)
         self.ephemeral_mgr = ZkEphermeralManager(node)
         self.ephemeral_mgr.start()
+        self.watch_mgr = ZkWatcher(node)
 
     def shutdown(self):
         super().shutdown()
@@ -247,7 +247,7 @@ class ZkWorker(Worker):
         cwd = self._cd_path(node, cmd.path, parent=True)
         cmd._child = cwd.create_child(basename, cmd.data, cmd.acl, cmd.flags)
 
-        self.watch_mgr.check_data_watch(cmd.path)
+        self.watch_mgr.check_data_watch(cmd.path, ZkWatcher.EVENT_CREATED)
         self.watch_mgr.check_child_watch(cmd.path)
 
         if cmd._child.is_ephemeral():
@@ -272,7 +272,7 @@ class ZkWorker(Worker):
         if parent_path == '':
             parent_path = '/'
 
-        self.watch_mgr.check_data_watch(cmd.path)
+        self.watch_mgr.check_data_watch(cmd.path, ZkWatcher.EVENT_DELETED)
         self.watch_mgr.check_child_watch(parent_path)
 
         return cmd
@@ -301,7 +301,7 @@ class ZkWorker(Worker):
         cwd.set_data(cmd.data)
         cmd._node = cwd
 
-        self.watch_mgr.check_data_watch(cmd.path)
+        self.watch_mgr.check_data_watch(cmd.path, ZkWatcher.EVENT_CHANGED)
         return cmd
 
     def do_get_acl(self, node, words):

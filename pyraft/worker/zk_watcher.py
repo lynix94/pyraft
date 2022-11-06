@@ -18,9 +18,9 @@ class ZkWatcher:
     STATE_CLOSED = 7
     STATE_EXPIRED = -112
 
-    def __init__(self):
-        self.child_watch_map = {}
-        self.data_watch_map = {}
+    def __init__(self, node):
+        self.lock = threading.Lock()
+        self.node = node
 
     def send_watch_notification(self, session, event, path):
         print('>> send watch notification to', session, event, path)
@@ -34,51 +34,35 @@ class ZkWatcher:
         io.write(noti)
 
     def check_child_watch(self, path):
-        if path in self.child_watch_map:
-            session_list = self.child_watch_map[path].keys()
+        with self.lock:
+            session_list = self.node.data.get('zk_watch_child_%s' % path)
+            if session_list == None:
+                return
+
             for session in session_list:
                 self.send_watch_notification(session, self.EVENT_CHILD, path)
 
-            del self.child_watch_map[path]
+            del self.node.data['zk_watch_child_%s' % path]
 
         return []
 
-    def check_data_watch(self, path):
-        if path in self.data_watch_map:
-            session_list = self.data_watch_map[path].keys()
-            for session in session_list:
-                self.send_watch_notification(session, self.EVENT_CHANGED, path)
+    def check_data_watch(self, path, event):
+        with self.lock:
+            session_list = self.node.data.get('zk_watch_data_%s' % path)
+            if session_list == None:
+                return
 
-            del self.data_watch_map[path]
+            for session in session_list:
+                self.send_watch_notification(session, event, path)
+
+            del self.node.data['zk_watch_data_%s' % path]
+
+        return []
 
     def regist_child_watch(self, path, session_id):
-        if path not in self.child_watch_map:
-            self.child_watch_map[path] = {}
-
-        self.child_watch_map[path][session_id] = True
-
-    def unregist_child_watch(self, path, session_id = None):
-        if path not in self.child_watch_map:
-            self.child_watch_map[path] = {}
-
-        if session_id is None:
-            del self.child_watch_map[path]
-        else:
-            del self.child_watch_map[path][session_id]
+        with self.lock:
+            self.node.request_async('rpush', 'zk_watch_child_%s' % path, session_id)
 
     def regist_data_watch(self, path, session_id):
-        if path not in self.data_watch_map:
-            self.data_watch_map[path] = {}
-
-        self.data_watch_map[path][session_id] = True
-        print(self.data_watch_map)
-
-    def unregist_data_watch(self, path, session_id = None):
-        if path not in self.data_watch_map:
-            self.data_watch_map[path] = {}
-
-        if session_id is None:
-            del self.data_watch_map[path]
-        else:
-            del self.data_watch_map[path][session_id]
-
+        with self.lock:
+            self.node.request_async('rpush', 'zk_watch_data_%s' % path, session_id)

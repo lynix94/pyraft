@@ -65,9 +65,12 @@ class ZkEphermeralManager:
     def expire(self, session):
         with self.lock:
             logger.info('session %s is deleted' % session)
-            #print('## expire %s' % session)
+            print('## expire %s' % session)
 
-            nodes = self.node.data['zk_sess_nodes_%s' % session]
+            nodes = self.node.data.get('zk_sess_nodes_%s' % session)
+            if nodes is None:
+                return
+
             for node in nodes:
                 logger.info('ephemeral node %s is deleted' % node)
                 self.node.request('trm', 'ZK%s' % node)
