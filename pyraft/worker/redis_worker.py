@@ -1,3 +1,5 @@
+import json
+
 from pyraft.common import *
 from pyraft.worker.worker import Worker
 from pyraft.worker.worker import RespProtocol
@@ -38,6 +40,126 @@ class RedisWorker(Worker):
         self.handler['lset'] = [self.do_lset, 'we', 3, 3]
         self.handler['lrem'] = [self.do_lrem, 'we', 3, 3]
         self.handler['ltrim'] = [self.do_ltrim, 'we', 3, 3]
+
+        # Tree (extended commands. not redis compatible)
+        self.handler['tget'] = [self.do_tget, 'r', 1, 2] # tget path [attr]
+        self.handler['tset'] = [self.do_tset, 'we', 3, -1] # tset path [json] | [attr data]*
+        self.handler['tls'] = [self.do_tls, 'r', 1, 1] # tls path
+        self.handler['tmk'] = [self.do_tmk, 'we', 1, 2] # tmk path [json] | [attr data]*
+        self.handler['trm'] = [self.do_trm, 'we', 1, -1] # trm path [attr+]
+
+    def do_tget(self, node, words):
+        path = words[1].strip()
+
+        nodes = path.split('/')
+        pwd = node.data
+        for n in nodes:
+            pwd = pwd.get(n)
+            if pwd is None:
+                raise RaftException('node does not exists')
+
+        if len(words) == 3:
+            ret = pwd.get(words[2])
+            if ret is None:
+                raise RaftException('attr does not exists')
+
+            return ret
+        else:
+            result = {}
+            for k, v in pwd.items():
+                if isinstance(v, dict):
+                    continue
+
+                result[k] = v
+
+            return json.dumps(result)
+
+    def do_tset(self, node, words):
+        path = words[1].strip()
+
+        if len(words) == 3:  # json
+            kv_map = json.loads(words[2])
+        else:
+            kv_map = {}
+            kv_list = words[2:]
+            for i in range(0, len(kv_list), 2):
+                kv_map[kv_list[i]] = kv_list[i + 1]
+
+        nodes = path.split('/')
+        pwd = node.data
+        for n in nodes:
+            pwd = pwd.get(n)
+            if pwd is None:
+                raise RaftException('node does not exists')
+
+        for k, v in kv_map.items():
+            if k in pwd and isinstance(k, dict):
+                raise RaftException('can not overwrite node')
+            pwd[k] = v
+
+        return True
+
+    def do_tls(self, node, words):
+        path = words[1].strip()
+
+        nodes = path.split('/')
+        pwd = node.data
+        for n in nodes:
+            pwd = pwd.get(n)
+            if pwd is None:
+                raise RaftException('node does not exists')
+
+        children = []
+        for k, v in pwd.items():
+            if isinstance(v, dict):
+                children.append(k)
+
+        return children
+
+    def do_tmk(self, node, words):
+        path = words[1].strip()
+
+        if len(words) == 3: # json
+            kv_map = json.loads(words[2])
+        else:
+            kv_map = {}
+            kv_list = words[2:]
+            for i in range(0, len(kv_list), 2):
+                kv_map[kv_list[i]] = kv_list[i+1]
+
+        nodes = path.split('/')
+        pwd = node.data
+        for n in nodes[:-1]:
+            pwd = pwd.get(n)
+            if pwd is None:
+                raise RaftException('node does not exists')
+
+        if nodes[-1] in pwd:
+            raise RaftException('node or attr is already exists')
+
+        pwd[nodes[-1]] = kv_map
+        return True
+
+    def do_trm(self, node, words):
+        path = words[1].strip()
+        attrs = words[2:]
+
+        nodes = path.split('/')
+        pwd = node.data
+        parent = None
+        for n in nodes:
+            parent = pwd
+            pwd = pwd.get(n)
+            if pwd is None:
+                raise RaftException('node does not exists')
+
+        if len(attrs) > 0:
+            for attr in attrs:
+                del parent[attr]
+        else:
+            del parent[nodes[-1]]
+
+        return True
 
     def do_lpush(self, node, words):
         key = words[1].strip()
