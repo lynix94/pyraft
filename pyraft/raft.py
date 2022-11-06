@@ -1,4 +1,4 @@
-import traceback, select
+import time, traceback, select
 import random, queue
 import argparse
 from logging.handlers import RotatingFileHandler
@@ -81,7 +81,7 @@ class RaftNode(object):
 
 		return handler
 
-	def propose(self, cmd, worker_offset=0):
+	def propose(self, cmd, worker_offset=0, async_run=False):
 		handler = self.get_handler(cmd[0].lower(), worker_offset)
 		if handler is None:
 			raise RaftException('unknown commands: %s' % cmd)
@@ -100,6 +100,9 @@ class RaftNode(object):
 
 			f = Future(cmd, worker_offset)
 			self.q_entry.put(f)
+
+			if async_run == True:
+				return f
 
 			ret = f.get(10)
 			if ret == ERROR_APPEND_ENTRY:
@@ -892,6 +895,8 @@ class RaftNode(object):
 
 		return ret
 
+	def request_async(self, *cmd):
+		return self.propose(cmd, async_run=True)
 
 def parse_default_args(parser):
 	parser.add_argument('-a', dest='addr', help='ip:port[port+1] (ex. -a 127.0.0.1:5010)')

@@ -7,6 +7,7 @@ from pyraft.worker.worker import Worker
 from pyraft.protocol import zk
 from pyraft.protocol.zk_exceptions import *
 from pyraft.worker.zk_watcher import ZkWatcher
+from pyraft.worker.zk_ephemeral import ZkEphermeralManager
 
 stat_struct = struct.Struct('!qqqqiiiqiiq')
 
@@ -27,7 +28,6 @@ def init_zk_stat():
 
     return stat
 
-
 class ZkNode(object):
     def __init__(self, name, obj):
         self.name = name
@@ -44,6 +44,12 @@ class ZkNode(object):
             super().__setattr__(key, value)
         else:
             self.obj[key] = value
+
+    def is_ephemeral(self):
+        return (self.flags & 1) != 0
+
+    def is_sequence(self):
+        return (self.flags & 2) != 0
 
     def stat_pack(self):
         s = self.stat
@@ -76,9 +82,6 @@ class ZkNode(object):
 
     def set_flags(self, flags):
         self.flags = flags
-
-    def get_stat(self):
-        self.stat
 
     def get_child(self, name):
         if name not in self.obj:
@@ -153,9 +156,24 @@ class ZkWorker(Worker):
         self.watch_mgr = ZkWatcher()
         self.session_map = {} # connected sessions
 
+    def start(self, node):
+        super().start(node)
+        self.ephemeral_mgr = ZkEphermeralManager(node)
+        self.ephemeral_mgr.start()
+
+    def shutdown(self):
+        super().shutdown()
+        self.ephemeral_mgr.quit_flag = True
+
+    def join(self):
+        super().join()
+        self.ephemeral_mgr.join()
+
     def init_node(self, node):
         if 'ZK' not in node.data:
             node.data['ZK'] = {'data':'', 'acl':[], 'flags':0, 'stat':init_zk_stat()}
+
+        self.node = node
 
     def init_zk_handler(self):
         self.handler['connect'] = [self.do_connect, 'r', 1, 1]
@@ -192,6 +210,8 @@ class ZkWorker(Worker):
 
     def do_close(self, node, words):
         cmd = words[1]
+
+        node.request('hdel', 'zk_session', str(cmd.session_id))
         return {'quit_after_send':cmd}
 
     def _cd_path(self, node, path, parent=False):
@@ -230,12 +250,21 @@ class ZkWorker(Worker):
         self.watch_mgr.check_data_watch(cmd.path)
         self.watch_mgr.check_child_watch(cmd.path)
 
+        if cmd._child.is_ephemeral():
+            cmd._child.stat['ephemeralOwner'] = cmd.session_id
+            self.ephemeral_mgr.regist(cmd.path, cmd._child)
+
         return cmd
 
     @handle_json
     def do_delete(self, node, words):
         cmd = words[1]
         basename = cmd.path.split('/')[-1]
+
+        cwd = self._cd_path(node, cmd.path)
+        if cwd.is_ephemeral():
+            self.ephemeral_mgr.unregist(cmd.path)
+
         cwd = self._cd_path(node, cmd.path, parent=True)
         cwd.delete_child(basename)
 
@@ -323,3 +352,4 @@ class ZkWorker(Worker):
     # TODO: reconfig
     # TODO: auth
     # TODO: sasl
+    # TODO: sequence
