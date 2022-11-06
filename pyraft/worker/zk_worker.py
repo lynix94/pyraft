@@ -129,7 +129,7 @@ def handle_json(handler):
 
 class ZkWorker(Worker):
     def __init__(self, addr):
-        super(ZkWorker, self).__init__(addr)
+        super().__init__(addr)
         self.init_zk_handler()
         self.set_protocol(ZkProtocol())
         self.watch_mgr = ZkWatcher()
@@ -164,8 +164,12 @@ class ZkWorker(Worker):
 
     def do_connect(self, node, words):
         cmd = words[1]
-        cmd.session_id = random.getrandbits(63)
+        if cmd.session_id == 0:
+            cmd.session_id = random.getrandbits(63)
+
         cmd.password = bytearray([random.getrandbits(8) for i in range(16)])
+
+        node.request('hset', 'zk_session', str(cmd.session_id), str(int(time.time())))
         return cmd
 
     def do_close(self, node, words):
@@ -279,8 +283,9 @@ class ZkWorker(Worker):
         return cmd
 
     def do_ping(self, node, words):
-        logger.info('process ping')
         cmd = words[1]
+        logger.debug('process ping session: %s' % cmd.session_id)
+        node.request('hset', 'zk_session', str(cmd.session_id), str(int(time.time())))
         return cmd
 
     def relay_cmd(self, leader, cmd, worker_offset): # cmd: ['create', ZkCreate]

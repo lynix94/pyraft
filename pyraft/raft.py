@@ -103,7 +103,7 @@ class RaftNode(object):
 
 			ret = f.get(10)
 			if ret == ERROR_APPEND_ENTRY:
-				self.log_info('append_entry failed (%s)' % str(words))
+				self.log_info('append_entry failed (%s)' % str(cmd))
 		else:
 			ret = handler[0](self, cmd)
 

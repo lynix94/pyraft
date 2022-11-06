@@ -6,7 +6,7 @@ from pyraft.worker.worker import RespProtocol
 # worker for data handling with redis interface
 class RedisWorker(Worker):
     def __init__(self, addr):
-        super(RedisWorker, self).__init__(addr)
+        super().__init__(addr)
         self.init_redis_handler()
         self.set_protocol(RespProtocol())
 

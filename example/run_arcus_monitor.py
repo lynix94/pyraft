@@ -8,7 +8,7 @@ from kazoo.client import KazooClient
 
 class ArcusMonitor(raft.RaftNode):
 	def __init__(self, nid, addr, ensemble, zk_addr, service_code):
-		super(ArcusMonitor, self).__init__(nid, addr, ensemble)
+		super().__init__(nid, addr, ensemble)
 
 		self.zk_addr = zk_addr
 		self.re_service_code = re.compile(service_code)

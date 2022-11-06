@@ -5,11 +5,11 @@ from collections import defaultdict
 
 class ZkException(RaftException): # internal exception (not for response)
     def __init__(self, msg):
-        super(ZkException, self).__init__(msg)
+        super().__init__(msg)
 
 class ZookeeperError(RaftException):
     def __init__(self):
-        super(ZookeeperError, self).__init__('')
+        super().__init__('')
 
 def _invalid_error_code():
     raise Exception('invalid error code')

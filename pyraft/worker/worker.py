@@ -145,7 +145,7 @@ class Worker:
 
 class MergedWorker(Worker):
     def __init__(self, addr, *workers):
-        super(MergedWorker, self).__init__(addr)
+        super().__init__(addr)
         self.worker_list = workers
 
     def get_handler(self, name):

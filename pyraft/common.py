@@ -25,7 +25,7 @@ ERROR_INVALID_PARAM = Exception('invalid parameter')
 
 class RaftException(Exception):
     def __init__(self, msg):
-        super(RaftException, self).__init__(msg)
+        super().__init__(msg)
 
 class Future(object):
     def __init__(self, cmd, worker_offset=0):

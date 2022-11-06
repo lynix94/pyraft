@@ -11,10 +11,10 @@ import logging
 
 class PingMonitor(raft.RaftNode):
 	def __init__(self, nid, addr, ensemble):
-		super(PingMonitor, self).__init__(nid, addr, ensemble)
+		super().__init__(nid, addr, ensemble)
 
 		self.repeated_fail_map = {}
-		self.failover_thread_hold = 5
+		self.failover_threshold = 5
 
 		self.failed_list_map = {}
 
@@ -40,7 +40,7 @@ class PingMonitor(raft.RaftNode):
 
 			voted = 0.0
 			for nid, repeated_fail in opinions.items():
-				if repeated_fail >= self.failover_thread_hold:
+				if repeated_fail >= self.failover_threshold:
 					voted += 1.0
 
 			if voted / len(opinions) > 0.666:

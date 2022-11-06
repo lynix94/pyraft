@@ -107,7 +107,7 @@ def resp_decoding(src):
 
 class resp_io(base_io):
 	def __init__(self, sock):
-		super(resp_io, self).__init__(sock)
+		super().__init__(sock)
 
 	def raw_encode(self, msg):
 		if not msg.endswith('\r\n'):

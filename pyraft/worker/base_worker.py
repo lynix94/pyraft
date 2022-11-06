@@ -6,7 +6,7 @@ from pyraft.worker.worker import RespProtocol
 # worker for basic control (info, shutdown, add_node, del_node etc)
 class BaseWorker(Worker):
     def __init__(self, addr):
-        super(BaseWorker, self).__init__(addr)
+        super().__init__(addr)
         self.init_base_handler()
         self.set_protocol(RespProtocol())
 

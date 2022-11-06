@@ -25,6 +25,11 @@ def set_session_io(session_id, io):
     global session_map
     session_map[session_id] = io
 
+def del_session_io(session_id):
+    global session_map
+    if session_id in session_map:
+        del session_map[session_id]
+
 def read_string(buffer, offset):
     """Reads an int specified buffer into a string and returns the
     string and the new offset in the buffer"""
@@ -301,7 +306,7 @@ class zk_io(base_io):
     zxid = 0
 
     def __init__(self, sock):
-        super(zk_io, self).__init__(sock)
+        super().__init__(sock)
         self.conn = ZkConnect()
         self.xid = 0
         self.relay_map = {}
@@ -325,6 +330,7 @@ class zk_io(base_io):
         # make header (if not connect)
 
         if isinstance(cmd, ZkConnect):
+            logger.info("get new session: %s" % cmd.session_id)
             set_session_io(cmd.session_id, self)
         else:
             error_code = 0
@@ -406,3 +412,7 @@ class zk_io(base_io):
         ret = s.recv(4096)
 
         return ret
+
+    def close(self):
+        super().close()
+        del_session_io(self.conn.session_id)
