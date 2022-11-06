@@ -1,5 +1,3 @@
-import time
-
 from pyraft.common import *
 from pyraft.worker.worker import Worker
 from pyraft.worker.worker import RespProtocol
@@ -11,7 +9,6 @@ class RedisWorker(Worker):
         super(RedisWorker, self).__init__(addr)
         self.init_redis_handler()
         self.set_protocol(RespProtocol())
-
 
     def init_redis_handler(self):
         # String

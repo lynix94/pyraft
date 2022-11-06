@@ -3,9 +3,11 @@ import traceback
 from pyraft.common import *
 from pyraft.protocol import resp
 
+
 class RespProtocol:
     def open_io(self, handle):
         return resp.resp_io(handle)
+
 
 class Worker:
     def __init__(self, addr):
@@ -138,7 +140,8 @@ class Worker:
         except Exception as e:
             p.req_io.close()
             delattr(p, 'req_io')
-            raise RaftException('relay to leader has exception: %s', str(e))
+            raise RaftException('relay to leader has exception: %s' % str(e))
+
 
 class MergedWorker(Worker):
     def __init__(self, addr, *workers):

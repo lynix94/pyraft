@@ -1,10 +1,8 @@
-import struct, socket, base64
+import struct
 
 from pyraft.common import *
 from pyraft.protocol.base import base_io
 from pyraft.protocol.zk_exceptions import *
-
-
 
 # came from kazoo serialization.py
 # Struct objects with formats compiled
@@ -18,6 +16,14 @@ long_struct = struct.Struct('!q')
 multiheader_struct = struct.Struct('!iBi')
 reply_header_struct = struct.Struct('!iqi')
 stat_struct = struct.Struct('!qqqqiiiqiiq')
+
+session_map = {}
+def get_session_io(session_id):
+    return session_map.get(session_id)
+
+def set_session_io(session_id, io):
+    global session_map
+    session_map[session_id] = io
 
 def read_string(buffer, offset):
     """Reads an int specified buffer into a string and returns the
@@ -60,6 +66,18 @@ def read_buffer(bytes, offset):
         index = offset
         offset += length
         return bytes[index:index + length], offset
+
+class ZkWatch:
+    def __init__(self, type, state, path):
+        self.type = type
+        self.state = state
+        self.path = path
+
+    def serialize(self, b):
+        b.extend(int_struct.pack(self.type))
+        b.extend(int_struct.pack(self.state))
+        b.extend(write_string(self.path))
+        return b
 
 class ZkClose:
     type = -11
@@ -305,24 +323,29 @@ class zk_io(base_io):
 
         b = bytearray()
         # make header (if not connect)
-        if not isinstance(cmd, ZkConnect):
+
+        if isinstance(cmd, ZkConnect):
+            set_session_io(cmd.session_id, self)
+        else:
             error_code = 0
+            xid = self.xid
             if isinstance(cmd, ZookeeperError):
                 error_code = cmd.code
-
             if isinstance(cmd, ZkPing):
                 zxid = self.zxid
+            if isinstance(cmd, ZkWatch):
+                xid = -1
+                zxid = -1
             else:
                 zxid = self.inc_zxid()
 
-            b.extend(reply_header_struct.pack(self.xid, zxid, error_code))
+            b.extend(reply_header_struct.pack(xid, zxid, error_code))
 
         # make body if not error
         if not isinstance(cmd, ZookeeperError):
             b = cmd.serialize(b)
 
         b = int_struct.pack(len(b)) + b
-
         return b
 
     def decode(self, buff):

@@ -6,6 +6,7 @@ from pyraft.common import *
 from pyraft.worker.worker import Worker
 from pyraft.protocol import zk
 from pyraft.protocol.zk_exceptions import *
+from pyraft.worker.zk_watcher import ZkWatcher
 
 stat_struct = struct.Struct('!qqqqiiiqiiq')
 
@@ -75,7 +76,6 @@ class ZkNode:
 
         self.children[name] = ZkNode(name, data, acl, flags)
         self.stat.cversion += 1
-
         return self.children[name]
 
     def delete_child(self, name):
@@ -120,6 +120,8 @@ class ZkWorker(Worker):
         super(ZkWorker, self).__init__(addr)
         self.init_zk_handler()
         self.set_protocol(ZkProtocol())
+        self.watch_mgr = ZkWatcher()
+        self.session_map = {} # connected sessions
 
     def init_node(self, node):
         if not hasattr(node, 'zk_root'):
@@ -191,6 +193,10 @@ class ZkWorker(Worker):
         basename = cmd.path.split('/')[-1]
         cwd = self._cd_path(node, cmd.path, parent=True)
         cmd._child = cwd.create_child(basename, cmd.data, cmd.acl, cmd.flags)
+
+        self.watch_mgr.check_data_watch(cmd.path)
+        self.watch_mgr.check_child_watch(cmd.path)
+
         return cmd
 
     @handle_json
@@ -199,10 +205,21 @@ class ZkWorker(Worker):
         basename = cmd.path.split('/')[-1]
         cwd = self._cd_path(node, cmd.path, parent=True)
         cwd.delete_child(basename)
+
+        parent_path = '/'.join(cmd.path.split('/')[:-1]) # '/aaa/bbb' -> '/aaa'
+        if parent_path == '':
+            parent_path = '/'
+
+        self.watch_mgr.check_data_watch(cmd.path)
+        self.watch_mgr.check_child_watch(parent_path)
+
         return cmd
 
     def do_exists(self, node, words):
         cmd = words[1]
+        if cmd.watcher:
+            self.watch_mgr.regist_data_watch(cmd.path, cmd.session_id)
+
         cmd._node = self._cd_path(node, cmd.path)
         return cmd
 
@@ -210,6 +227,9 @@ class ZkWorker(Worker):
         cmd = words[1]
         cwd = self._cd_path(node, cmd.path)
         cmd._node = cwd
+        if cmd.watcher:
+            self.watch_mgr.regist_data_watch(cmd.path, cmd.session_id)
+
         return cmd
 
     @handle_json
@@ -218,6 +238,8 @@ class ZkWorker(Worker):
         cwd = self._cd_path(node, cmd.path)
         cwd.set_data(cmd.data)
         cmd._node = cwd
+
+        self.watch_mgr.check_data_watch(cmd.path)
         return cmd
 
     def do_get_acl(self, node, words):
@@ -239,6 +261,10 @@ class ZkWorker(Worker):
         cwd = self._cd_path(node, cmd.path)
         cmd._children = cwd.get_children()
         cmd._node = cwd
+
+        if cmd.watcher:
+            self.watch_mgr.regist_child_watch(cmd.path, cmd.session_id)
+
         return cmd
 
     def do_ping(self, node, words):
