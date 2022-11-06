@@ -29,7 +29,8 @@ def init_zk_stat():
 
 
 class ZkNode(object):
-    def __init__(self, obj):
+    def __init__(self, name, obj):
+        self.name = name
         self.obj = obj
 
     def __getattr__(self, name):
@@ -39,13 +40,21 @@ class ZkNode(object):
         raise Exception('%s not found' % name)
 
     def __setattr__(self, key, value):
-        super().__setattr__(key, value)
+        if key in ['name', 'obj']:
+            super().__setattr__(key, value)
+        else:
+            self.obj[key] = value
 
     def stat_pack(self):
         s = self.stat
+        n_child = 0
+        for v in self.obj.values():
+            if isinstance(v, dict):
+                n_child += 1
+
         return stat_struct.pack(s['czxid'], s['mzxid'], s['ctime'], s['mtime'],
                                 s['version'], s['cversion'], s['aversion'],
-                                s['ephermeralOwner'], len(self.data), len(self.children),
+                                s['ephermeralOwner'], len(self.data), n_child,
                                 s['pzxid'])
 
     def get_data(self):
@@ -72,35 +81,44 @@ class ZkNode(object):
         self.stat
 
     def get_child(self, name):
-        if name not in self.children:
+        if name not in self.obj:
             raise NoNodeError()
 
-        return ZkNode(self.children[name])
+        if not isinstance(self.obj[name], dict):
+            raise NoNodeError()
+
+        return ZkNode(name, self.obj[name])
 
     def create_child(self, name, data, acl, flags):
-        if name in self.children:
+        if name in ['data', 'acl', 'flags', 'stat']:
+            logger.error('%s is not allowed in zk tree' % name)
+            raise BadArgumentsError()
+
+        if name in self.obj:
             raise NodeExistsError()
 
-        self.children[name] = {'name':name, 'data':data, 'acl':acl, 'flags':flags, 'stat':init_zk_stat(), 'children':{}}
+        self.obj[name] = {'data':data, 'acl':acl, 'flags':flags, 'stat':init_zk_stat()}
         self.stat['cversion'] += 1
-        return ZkNode(self.children[name])
+        return ZkNode(name, self.obj[name])
 
     def delete_child(self, name):
-        if name not in self.children:
+        if name not in self.obj:
             raise NoNodeError()
 
-        child = self.children[name]
-        if len(child['children']) > 0:
-            raise NotEmptyError()
+        child = self.obj[name]
 
-        del self.children[name]
-        self.stat.cversion += 1
+        for k, v in child.items():
+            if k != 'stat' and isinstance(v, dict):
+                raise NotEmptyError()
+
+        del self.obj[name]
+        self.stat['cversion'] += 1
 
     def get_children(self):
         ret = []
-        children = self.children.values()
-        for child in children:
-            ret.append(ZkNode(child))
+        for k, v in self.obj.items():
+            if k != 'stat' and isinstance(v, dict):
+                ret.append(ZkNode(k, v))
 
         return ret
 
@@ -136,8 +154,8 @@ class ZkWorker(Worker):
         self.session_map = {} # connected sessions
 
     def init_node(self, node):
-        if '__ZK_ROOT__' not in node.data:
-            node.data['__ZK_ROOT__'] = {'name':'root', 'data':'', 'acl':[], 'flags':0, 'stat':init_zk_stat(), 'children':{}}
+        if 'ZK' not in node.data:
+            node.data['ZK'] = {'data':'', 'acl':[], 'flags':0, 'stat':init_zk_stat()}
 
     def init_zk_handler(self):
         self.handler['connect'] = [self.do_connect, 'r', 1, 1]
@@ -184,10 +202,10 @@ class ZkWorker(Worker):
             raise BadArgumentsError()
 
         if path.strip() == '/':
-            return ZkNode(node.data['__ZK_ROOT__'])
+            return ZkNode('ZK', node.data['ZK'])
 
         dir_list = path[1:].split('/')
-        cwd = ZkNode(node.data['__ZK_ROOT__'])
+        cwd = ZkNode('ZK', node.data['ZK'])
         count = len(dir_list)
         if parent:
             count -= 1
