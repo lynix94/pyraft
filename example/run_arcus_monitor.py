@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import os, sys, time, copy, re
 import threading, argparse
 import asyncio

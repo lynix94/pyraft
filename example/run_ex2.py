@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import os, sys, time
 import threading
 from pyraft import raft
