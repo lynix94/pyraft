@@ -9,8 +9,8 @@ from pyraft import raft
 from kazoo.client import KazooClient
 
 class ArcusMonitor(raft.RaftNode):
-	def __init__(self, nid, addr, ensemble, zk_addr, service_code):
-		super().__init__(nid, addr, ensemble)
+	def __init__(self, nid, addr, ensemble, zk_addr, service_code, overwrite_peer):
+		super().__init__(nid, addr, ensemble, overwrite_peer=overwrite_peer)
 
 		self.zk_addr = zk_addr
 		self.re_service_code = re.compile(service_code)
@@ -204,7 +204,7 @@ if __name__ == '__main__':
 
 	args = raft.parse_default_args(parser)
 
-	node = ArcusMonitor(args.nid, args.addr, args.ensemble_map, args.zk_addr, args.cloud)
+	node = ArcusMonitor(args.nid, args.addr, args.ensemble_map, args.zk_addr, args.cloud, args.overwrite_peer)
 	node.failover_count_limit = args.failover_count_limit
 	node.failover_threshold = args.failover_threshold
 	node.cooldown_time = args.cooldown_time
