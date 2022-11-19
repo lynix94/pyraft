@@ -68,7 +68,7 @@ class ArcusMonitor(raft.RaftNode):
 				if repeated_fail >= self.failover_threshold:
 					voted += 1.0
 
-			if voted / len(opinions) > 0.666:
+			if voted / len(opinions) > 0.5:
 				self.do_failover(addr)
 
 	async def check_arcus(self, addr):
@@ -131,10 +131,6 @@ class ArcusMonitor(raft.RaftNode):
 				jobs = []
 
 			if self.state == 'l':
-				if self.get_pending_time() >= 5: # if pending time is more than 5. this can be a splitted master
-					self.log_error('It can be a splitted brain. wait a new leader')
-					continue
-
 				self.do_make_decision()
 
 			# print working report every 60s

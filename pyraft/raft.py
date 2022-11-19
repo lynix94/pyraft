@@ -357,6 +357,7 @@ class RaftNode(object):
 			if peer.addr != addr:
 				rio.write(Exception('nid already in ensemble'))
 				rio.close()
+				self.del_node(nid)
 				return
 			else:
 				# reconnect
