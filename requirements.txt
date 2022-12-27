@@ -1,2 +1,2 @@
 redis==3.4.1
-setuptools==41.2.0
+setuptools==65.5.1
