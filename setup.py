@@ -4,7 +4,7 @@ import setuptools
 from setuptools import setup
 from os import path
 
-__version__ = '0.1.4'
+__version__ = '0.1.5'
 
 requirements = [req.strip() for req in open('requirements.txt').readlines()]
 

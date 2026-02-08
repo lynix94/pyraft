@@ -16,6 +16,7 @@ class RaftNode(object):
 		# raft node & peer common
 		self.nid = nid
 		self.term = 0
+		self.votedFor = None
 		self.index = 0
 		self.state = 'c'
 		self.last_append_entry_ts = 1
@@ -175,6 +176,7 @@ class RaftNode(object):
 		meta['id'] = self.nid
 		meta['state'] = self.state
 		self.term = meta['term']
+		self.votedFor = meta.get('votedFor', None)
 		self.index = meta['index']
 		self.log.index = self.index
 
@@ -480,6 +482,14 @@ class RaftNode(object):
 		if toks[0] == 'append_entry': # append_entry, term, prev_term, prev_index, commit_index, ts, worker_offset, cmds...
 			ts = toks[5]
 			if len(toks) > 6:
+				# Log matching check
+				if prev_index > 0:
+					my_prev_term = self.log.get_term_at(prev_index)
+					if my_prev_term != prev_term:
+						self.log_warn('log mismatch at index %d: term %d != %d' % (prev_index, my_prev_term, prev_term))
+						p.raft_wait.write('nack %d' % self.index)
+						return False
+				
 				self.log_debug('apply append_entry to %d-%d' % (term, prev_index))
 				index = prev_index + 1
 				item = LogItem(self.term, index, ts, int(toks[6]), toks[7:])
@@ -493,6 +503,7 @@ class RaftNode(object):
 			meta['id'] = self.nid
 			meta['state'] = self.state
 			self.term = meta['term']
+			self.votedFor = meta.get('votedFor', None)
 			self.index = meta['index']
 			self.log.index = self.index
 			index = self.index
@@ -553,7 +564,12 @@ class RaftNode(object):
 						continue
 
 					if term > self.term:
-						p.raft_wait.write('yes')
+						if self.votedFor is None or self.votedFor == p.nid:
+							self.votedFor = p.nid
+							self.term = term
+							p.raft_wait.write('yes')
+						else:
+							p.raft_wait.write('no')
 					else:
 						p.raft_wait.write('no')
 				else:
@@ -565,9 +581,12 @@ class RaftNode(object):
 						self.index = 0
 						return
 
-		if self.last_append_entry_ts > 0 and int(time.time()) - self.last_append_entry_ts > CONF_PING_TIMEOUT:
+		# Randomized election timeout
+		election_timeout = CONF_PING_TIMEOUT + random.randint(0, CONF_PING_TIMEOUT * 1000) / 1000.0
+		if self.last_append_entry_ts > 0 and int(time.time()) - self.last_append_entry_ts > election_timeout:
 			self.on_candidate()
 			self.state = 'c'
+			self.votedFor = None
 
 
 	def do_candidate(self):
@@ -581,6 +600,7 @@ class RaftNode(object):
 
 		#self.log_info('do_candidate')
 		self.term += 1
+		self.votedFor = self.nid  # Vote for self
 
 		voting_wait = CONF_VOTING_TIME * 0.1
 		vote_wait_timeout = random.randint(0, CONF_VOTING_TIME*1000  * 0.5) / 1000.0
@@ -605,12 +625,17 @@ class RaftNode(object):
 						continue
 
 					if not voted and term >= self.term:
-						p.raft_wait.write('yes')
-						voted = True
-						self.term = term
-					else:
-						if term >= self.term:
+						if self.votedFor is None or self.votedFor == p.nid:
+							p.raft_wait.write('yes')
+							voted = True
+							self.votedFor = p.nid
 							self.term = term
+						else:
+							p.raft_wait.write('no')
+					else:
+						if term > self.term:
+							self.term = term
+							self.votedFor = None
 							
 						p.raft_wait.write('no')
 				else:
@@ -666,8 +691,7 @@ class RaftNode(object):
 		self.log_info('get %d. voters: %s' % (count, str(voters)))
 		if count > (len(self.peers)+1)/2:
 			self.log_info('%s is a leader' % (self.nid))
-			self.set_leader(self)
-			self.term += 10 
+			self.set_leader(self) 
 
 
 	def append_entry(self, future):
@@ -772,6 +796,7 @@ class RaftNode(object):
 		meta = {}
 		meta['id'] = self.nid
 		meta['term'] = self.term
+		meta['votedFor'] = self.votedFor
 		meta['index'] = self.index
 		meta['state'] = self.state
 

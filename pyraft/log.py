@@ -225,8 +225,26 @@ class RaftLog(object):
     def get_term(self):
         return self.term
 
-    def close(self):
-        self.log.close()
+	def get_term_at(self, index):
+		"""Get term at specific log index"""
+		if index == 0:
+			return 0
+		
+		if index == self.index:
+			return self.term
+		
+		# Check temp_item first
+		with self.lock:
+			for item in self.temp_item:
+				if item and item.index == index:
+					return item.term
+		
+		# Check log storage
+		items = self.get_range(index, index + 1)
+		if len(items) > 0 and items[0].index == index:
+			return items[0].term
+		
+		return -1  # Not found
 
 
 
