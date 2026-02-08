@@ -905,10 +905,11 @@ class RaftNode(object):
 
 def parse_default_args(parser):
 	parser.add_argument('-a', dest='addr', help='ip:port[port+1], :port means pick one ip by gethostbyname (ex. -a 127.0.0.1:5010)')
-	parser.add_argument('-e', dest='ensemble', help='ensemble ip list or domain name with port (ex. -e 2/127.0.0.1:5020,3/127.0.0.1:5030 or -e 127.0.0.1:5020,127.0.0.1:5030 or -e pyraft.test.com:5010)')
+	parser.add_argument('-e', dest='ensemble', help='ensemble ip:port list (ex. -e 2/127.0.0.1:5020,3/127.0.0.1:5030 or -e 127.0.0.1:5020,127.0.0.1:5030)')
 	parser.add_argument('-i', dest='nid', help='self node id (if not exists, use address, HOSTNAME use machine hostname) (ex. -i 1)')
 	parser.add_argument('-l', dest='load', help='checkpoint filename to load')
 	parser.add_argument('-o', dest='overwrite_peer', help='overwrite duplicated nid node (delete previous one)', action='store_true')
+	parser.add_argument('-use_dns', dest='use_dns', help='use domain name in ensemble (ex. -e pyraft.test.com:5010)', action='store_true')
 	parser.add_argument('-loglevel', dest='loglevel', default='info', help='loglevel (debug, info, warning, error, fatal)')
 	parser.add_argument('-logfile', dest='logfile', help='logger rotation file')
 
@@ -941,24 +942,15 @@ def parse_default_args(parser):
 		raise RaftException('addr is required')
 
 	if args.addr.startswith(':'):
-		ip = socket.gethostbyname(socket.gethostname())
-		args.addr = '%s%s' % (ip, args.addr)
+		args.addr = '0.0.0.0%s' % args.addr
 
 	if args.nid == None:
-		args.nid = args.addr
-
-	if args.nid == 'HOSTNAME':
 		args.nid = socket.gethostname()
 
 	ensemble = {}
 	if args.ensemble != None:
-		is_domain_name = False
-		for c in args.ensemble:
-			if c.isalpha():
-				is_domain_name = True
-				break
-
-		if is_domain_name:
+		if hasattr(args, 'use_dns') and args.use_dns:
+			# domain name mode
 			if ':' not in args.ensemble:
 				print('domain name ensemble should include port')
 				sys.exit(-1)
@@ -972,6 +964,7 @@ def parse_default_args(parser):
 			except socket.gaierror: # in k8s DNS is setup later
 				pass
 		else:
+			# ip:port mode
 			toks = args.ensemble.split(',')
 			for tok in toks:
 				etoks = tok.split('/')
@@ -982,8 +975,7 @@ def parse_default_args(parser):
 				elif len(etoks) == 1:
 					addr = tok
 					if addr.startswith(':'):
-						ip = socket.gethostbyname(socket.gethostname())
-						addr = '%s%s' % (ip, addr)
+						args.addr = '0.0.0.0%s' % addr
 
 					ensemble['__TEMP_%s__' % addr] = addr
 				else:
